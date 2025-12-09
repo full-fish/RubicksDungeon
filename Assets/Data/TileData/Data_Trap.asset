@@ -13,10 +13,14 @@ MonoBehaviour:
   m_Name: Data_Trap
   m_EditorClassIdentifier: Assembly-CSharp::TileData
   tileID: 2
-  prefab: {fileID: 919132149155446097, guid: 74d7e9eef2b4ff44e80ca8b50669e919, type: 3}
-  isWall: 0
-  isPushable: 0
-  isTrap: 0
+  variants:
+  - prefab: {fileID: 919132149155446097, guid: 74d7e9eef2b4ff44e80ca8b50669e919, type: 3}
+    chance: 100
+  hasFloorUnder: 1
+  isStop: 0
+  isPush: 0
+  isShift: 1
+  isDead: 1
   isGoal: 0
   isFire: 0
   isIce: 0

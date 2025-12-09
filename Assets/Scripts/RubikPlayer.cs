@@ -28,10 +28,10 @@ public class RubikPlayer : MonoBehaviour
 
     void HandleInteraction()
     {
-        // [수정 1] W, S의 부호를 반대로 변경 (1 <-> -1)
+        // 맵 회전 (W, S 부호 반대로 설정됨)
         if (Keyboard.current.dKey.wasPressedThisFrame) _manager.TryPushRow(-1);
         else if (Keyboard.current.aKey.wasPressedThisFrame) _manager.TryPushRow(1);
-        else if (Keyboard.current.sKey.wasPressedThisFrame) _manager.TryPushCol(1);  // -1에서 1로 변경 (아래로)
-        else if (Keyboard.current.wKey.wasPressedThisFrame) _manager.TryPushCol(-1); // 1에서 -1로 변경 (위로)
+        else if (Keyboard.current.sKey.wasPressedThisFrame) _manager.TryPushCol(1);
+        else if (Keyboard.current.wKey.wasPressedThisFrame) _manager.TryPushCol(-1);
     }
 }

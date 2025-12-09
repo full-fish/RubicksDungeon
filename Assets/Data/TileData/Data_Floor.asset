@@ -13,10 +13,16 @@ MonoBehaviour:
   m_Name: Data_Floor
   m_EditorClassIdentifier: Assembly-CSharp::TileData
   tileID: 0
-  prefab: {fileID: 919132149155446097, guid: ddc93669dccb3e446bb6eb0c8520eca9, type: 3}
-  isWall: 0
-  isPushable: 0
-  isTrap: 0
+  variants:
+  - prefab: {fileID: 919132149155446097, guid: ddc93669dccb3e446bb6eb0c8520eca9, type: 3}
+    chance: 80
+  - prefab: {fileID: 919132149155446097, guid: b6dc4b60d3a9c2b42a4034a51931654a, type: 3}
+    chance: 20
+  hasFloorUnder: 0
+  isStop: 0
+  isPush: 0
+  isShift: 1
+  isDead: 0
   isGoal: 0
   isFire: 0
   isIce: 0
