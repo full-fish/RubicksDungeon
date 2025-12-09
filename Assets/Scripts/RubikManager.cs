@@ -1,275 +1,188 @@
 using UnityEngine;
 using System.Collections;
 using System; 
+using System.Collections.Generic; // List 사용
 
 public class RubikManager : MonoBehaviour
 {
-    [Header("핵심 연결")]
-    public GridSystem gridSystem; 
+    public GridSystem gridSystem;
     public UIManager uiManager;
-
-    [Header("데이터")]
     public TileData[] tilePalette;
     public TextAsset[] levelFiles; 
     public int currentLevelIndex = 0; 
-
-    [Header("비주얼")]
+    
     public GameObject prefabPlayer;
     [Range(0.5f, 1.0f)] public float tileSizeXZ = 0.8f;
     [Range(0.1f, 3.0f)] public float tileHeight = 0.2f;
 
-    private GameObject[,] objMap;
+    private GameObject[,] objMap; // 1층 오브젝트만 대표 저장
     private GameObject objPlayer;
     private bool isGameEnding = false;
+    private float _lastSizeXZ, _lastHeight;
+    private int width, height;
 
-    // 실시간 갱신 감지용
-    private float _lastSizeXZ;
-    private float _lastHeight;
-    private int width;
-    private int height;
-
-    void Start()
-    {
+    void Start() {
         if (gridSystem == null) gridSystem = GetComponent<GridSystem>();
-        
-        // GridSystem 이벤트 연결
         gridSystem.OnMapChanged += UpdateView;
         gridSystem.OnPlayerMoved += UpdatePlayerVis;
         gridSystem.OnTrapTriggered += () => StartCoroutine(ProcessFail());
         gridSystem.OnGoalTriggered += () => StartCoroutine(ProcessClear());
-
         InitializeGame();
     }
 
-    // 실시간 비주얼 갱신 (Play 모드 중 인스펙터 조절 반영)
-    void Update()
-    {
-        if (tileSizeXZ != _lastSizeXZ || tileHeight != _lastHeight)
-        {
-            SyncVisuals();
-            _lastSizeXZ = tileSizeXZ;
-            _lastHeight = tileHeight;
+    void Update() {
+        if (tileSizeXZ != _lastSizeXZ || tileHeight != _lastHeight) {
+            SyncVisuals(); _lastSizeXZ = tileSizeXZ; _lastHeight = tileHeight;
         }
     }
 
-    void InitializeGame()
-    {
-        StopAllCoroutines();
-        isGameEnding = false;
+    void InitializeGame() {
+        StopAllCoroutines(); isGameEnding = false;
         if (uiManager != null) uiManager.HideAll();
-
         ClearMapVisuals();
-        LoadMapAndInitGrid(); 
-
-        UpdateView();
-        UpdatePlayerVis();
-        AutoAdjustCamera();
-
-        _lastSizeXZ = tileSizeXZ;
-        _lastHeight = tileHeight;
+        LoadMap(); 
+        UpdateView(); UpdatePlayerVis(); AutoAdjustCamera();
     }
 
-    // 입력 전달
-    public void TryMovePlayer(int dx, int dy) 
-    { 
-        if(!isGameEnding) 
-        {
-            RotatePlayer(dx, dy); // ★ 먼저 몸을 돌림
-            gridSystem.TryMovePlayer(dx, dy); // 그 다음 이동 로직 실행
-        }
+    public void TryMovePlayer(int dx, int dy) { 
+        if(!isGameEnding) { RotatePlayer(dx, dy); gridSystem.TryMovePlayer(dx, dy); } 
     }
-    public void TryPushRow(int dir)           { if(!isGameEnding) gridSystem.TryPushRow(dir); }
-    public void TryPushCol(int dir)           { if(!isGameEnding) gridSystem.TryPushCol(dir); }
+    public void TryPushRow(int dir) { if(!isGameEnding) gridSystem.TryPushRow(dir); }
+    public void TryPushCol(int dir) { if(!isGameEnding) gridSystem.TryPushCol(dir); }
 
-    void LoadMapAndInitGrid()
+    // ★ [핵심] 3개 층 맵 파일 파싱 함수
+    void LoadMap()
     {
         if (levelFiles == null || levelFiles.Length == 0) return;
-        if (currentLevelIndex >= levelFiles.Length) currentLevelIndex = 0;
+        string text = levelFiles[currentLevelIndex].text.Replace("\r", "");
+        
+        // 1. "---" 구분자로 층 분리
+        // (Layer 0, Layer 1, Layer 2 순서)
+        string[] layerBlocks = text.Split(new string[] { "---" }, StringSplitOptions.RemoveEmptyEntries);
+        
+        // 2. 맵 크기 측정 (첫 번째 블록 기준)
+        string[] firstLayerLines = layerBlocks[0].Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        height = firstLayerLines.Length;
+        width = firstLayerLines[0].Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
 
-        string[] lines = levelFiles[currentLevelIndex].text.Replace("\r", "").Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        height = lines.Length; 
-        width = lines[0].Trim().Split(' ').Length; 
-
-        int[,] mapData = new int[width, height];
+        // 3. 3차원 배열 생성
+        int[,,] maps = new int[width, height, 3];
+        Vector2Int startPos = new Vector2Int(width/2, height/2);
         objMap = new GameObject[width, height];
 
-        // 기본값은 중앙이지만, 0번을 찾으면 바뀔 예정
-        Vector2Int startPos = new Vector2Int(width / 2, height / 2); 
-
-        for (int y = 0; y < height; y++)
+        // 4. 각 층 데이터 채우기
+        for (int l = 0; l < 3; l++)
         {
-            string[] numbers = lines[height - 1 - y].Trim().Split(' '); 
-            for (int x = 0; x < width; x++)
-            {
-                if (x < numbers.Length) 
-                {
-                    int parsedID = int.Parse(numbers[x]);
+            if (l >= layerBlocks.Length) break; // 맵 파일에 층이 부족하면 중단
 
-                    // ★ [핵심 수정] 맵 파일에서 0(플레이어)을 발견하면?
-                    if (parsedID == 0)
+            string[] lines = layerBlocks[l].Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            
+            // 텍스트 파일은 위에서 아래로 읽지만, 유니티 좌표(y)는 아래에서 위로 증가하므로 뒤집어서 읽음
+            for (int y = 0; y < height; y++)
+            {
+                // lines[0]이 맨 위 줄(y = height-1)이어야 함
+                string[] nums = lines[height - 1 - y].Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                
+                for (int x = 0; x < width; x++)
+                {
+                    if (x < nums.Length)
                     {
-                        startPos = new Vector2Int(x, y); // 시작 위치로 등록
-                        mapData[x, y] = 100; // 그 자리는 '기본 바닥(100)'으로 채움
-                    }
-                    else
-                    {
-                        mapData[x, y] = parsedID; // 나머지는 그대로 저장
+                        int id = int.Parse(nums[x]);
+                        
+                        // -1은 빈 공간(0)으로 처리
+                        if (id == -1) id = 0;
+
+                        // 0번(플레이어) 발견 시 시작 위치 저장하고 빈 공간으로 만듦
+                        if (id == 0 && nums[x] == "0") // 텍스트가 명시적으로 "0"일 때
+                        {
+                            if (l == 1) startPos = new Vector2Int(x, y); // 플레이어는 1층에 있어야 함
+                            id = 0; // 데이터 상으로는 0(빈 공간)
+                        }
+
+                        maps[x, y, l] = id;
                     }
                 }
             }
         }
-        
-        // [삭제됨] mapData[startPos.x, startPos.y] = 0; <- 이 강제 초기화 코드는 삭제했습니다.
 
-        gridSystem.Initialize(width, height, mapData, tilePalette, startPos);
+        gridSystem.Initialize(width, height, maps, tilePalette, startPos);
     }
 
-   void UpdateView()
+    void UpdateView()
     {
         ClearMapVisuals();
-        float offsetX = width / 2f - 0.5f;
-        float offsetZ = height / 2f - 0.5f;
+        float oX = width/2f - 0.5f, oZ = height/2f - 0.5f;
 
-        TileData baseFloorData = GetTileData(100);
-
-        for (int x = 0; x < width; x++)
-        {
-            for (int y = 0; y < height; y++)
-            {
-                int id = gridSystem.GetTileID(x, y);
-                int variantNum = gridSystem.GetTileVariant(x, y);
-                TileData data = GetTileData(id);
-
-                if (data != null)
-                {
-                    Vector3 pos = new Vector3(x - offsetX, 0, y - offsetZ);
-
-                    // ★ [계산] 이 타일의 최종 높이 = 기본 높이 * 개별 배율
-                    float myHeight = tileHeight * data.heightMultiplier;
-
-                    VisualVariant v = data.GetVariantByWeight(variantNum);
-                    if (v.prefab != null)
-                    {
-                        GameObject newObj = Instantiate(v.prefab, pos, Quaternion.identity);
-                        ApplyMaterial(newObj, v.overrideMat);
-
-                        newObj.transform.parent = transform;
-                        // ★ 높이 적용 (myHeight)
-                        newObj.transform.localScale = new Vector3(tileSizeXZ, myHeight, tileSizeXZ);
-                        newObj.transform.position += Vector3.up * (myHeight / 2f);
-                        objMap[x, y] = newObj;
-                    }
+        for (int x=0; x<width; x++) {
+            for (int y=0; y<height; y++) {
+                Vector3 pos = new Vector3(x - oX, 0, y - oZ);
+                for(int l=0; l<3; l++) {
+                    int pid = gridSystem.GetLayerID(x, y, l);
+                    int variant = gridSystem.GetLayerVariant(x, y, l);
+                    if(pid != 0) CreateObj(pid, variant, pos, l, x, y);
                 }
             }
         }
     }
 
-    void ApplyMaterial(GameObject obj, Material mat)
-    {
-        if (mat != null)
-        {
-            Renderer r = obj.GetComponentInChildren<Renderer>();
-            if (r != null) r.material = mat;
+    void CreateObj(int id, int var, Vector3 pos, int layer, int x, int y) {
+        TileData d = GetTileData(id);
+        if (d != null) {
+            VisualVariant v = d.GetVariantByWeight(var);
+            if (v.prefab != null) {
+                GameObject go = Instantiate(v.prefab, pos, Quaternion.Euler(v.rotation));
+                if(v.overrideMat != null) {
+                    Renderer r = go.GetComponentInChildren<Renderer>();
+                    if(r) r.material = v.overrideMat;
+                }
+                go.transform.parent = transform;
+                
+                float hm = (layer == 0) ? 1.0f : d.heightMultiplier;
+                float h = tileHeight * hm;
+                go.transform.localScale = new Vector3(tileSizeXZ, h, tileSizeXZ);
+                
+                float yOff = (layer == 0) ? 0 : (layer == 1 ? tileHeight : tileHeight * 3); // 층 간격 (2층은 좀 더 높게)
+                go.transform.position += Vector3.up * (yOff + h/2f);
+
+                if(layer == 1) objMap[x, y] = go; 
+            }
         }
     }
 
-    void UpdatePlayerVis()
-    {
-        if (objPlayer == null)
-        {
+    void SyncVisuals() {
+        if(objPlayer != null) UpdatePlayerVis();
+        for(int x=0; x<width; x++) {
+            for(int y=0; y<height; y++) {
+                if(objMap[x,y] != null) {
+                    int id = gridSystem.GetLayerID(x, y, 1); // 1층 확인
+                    TileData d = GetTileData(id);
+                    float h = tileHeight * (d!=null?d.heightMultiplier:1);
+                    objMap[x,y].transform.localScale = new Vector3(tileSizeXZ, h, tileSizeXZ);
+                }
+            }
+        }
+    }
+
+    void UpdatePlayerVis() {
+        if (objPlayer == null) {
             objPlayer = Instantiate(prefabPlayer);
             objPlayer.transform.parent = transform;
-            var playerScript = objPlayer.GetComponent<RubikPlayer>();
-            if (playerScript == null) playerScript = objPlayer.AddComponent<RubikPlayer>();
-            playerScript.Init(this);
+            objPlayer.AddComponent<RubikPlayer>().Init(this);
         }
-        
-        Vector2Int idx = gridSystem.PlayerIndex;
-        float offsetX = width / 2f - 0.5f;
-        float offsetZ = height / 2f - 0.5f;
-        Vector3 pos = new Vector3(idx.x - offsetX, tileHeight, idx.y - offsetZ);
-        objPlayer.transform.position = pos;
+        Vector2Int i = gridSystem.PlayerIndex;
+        float oX = width/2f - 0.5f, oZ = height/2f - 0.5f;
+        // 플레이어는 1층 높이(tileHeight) 위에 서야 함
+        objPlayer.transform.position = new Vector3(i.x - oX, tileHeight, i.y - oZ);
     }
 
-    void SyncVisuals()
-    {
-        if (objMap == null || gridSystem == null) return;
-
-        // ... (플레이어 갱신 코드는 그대로) ...
-
-        for (int x = 0; x < width; x++)
-        {
-            for (int y = 0; y < height; y++)
-            {
-                GameObject tile = objMap[x, y];
-                if (tile != null)
-                {
-                    // 데이터 가져오기
-                    int id = gridSystem.GetTileID(x, y);
-                    TileData data = GetTileData(id);
-                    
-                    // 기본값 1.0 (데이터가 없거나 못 찾으면)
-                    float multiplier = (data != null) ? data.heightMultiplier : 1.0f;
-                    
-                    // ★ 개별 높이 계산
-                    float myHeight = tileHeight * multiplier;
-
-                    tile.transform.localScale = new Vector3(tileSizeXZ, myHeight, tileSizeXZ);
-                    
-                    Vector3 pos = tile.transform.position;
-                    pos.y = myHeight / 2f;
-                    tile.transform.position = pos;
-                }
-            }
-        }
-    }
-    TileData GetTileData(int id)
-    {
-        foreach (var data in tilePalette) if (data.tileID == id) return data;
-        return null;
+    void RotatePlayer(int dx, int dy) {
+        if(objPlayer && (dx!=0 || dy!=0)) 
+            objPlayer.transform.rotation = Quaternion.LookRotation(new Vector3(dx, 0, dy));
     }
 
-    IEnumerator ProcessFail()
-    {
-        isGameEnding = true;
-        if (uiManager != null) uiManager.ShowFail();
-        yield return new WaitForSeconds(1.5f);
-        InitializeGame();
-    }
-
-    IEnumerator ProcessClear()
-    {
-        isGameEnding = true;
-        if (uiManager != null) uiManager.ShowClear();
-        yield return new WaitForSeconds(1.5f);
-        currentLevelIndex++;
-        InitializeGame();
-    }
-
-    void ClearMapVisuals() { if (objMap != null) foreach (var obj in objMap) if (obj != null) Destroy(obj); }
-    
-    void AutoAdjustCamera()
-    {
-        Camera cam = Camera.main;
-        if (cam == null) return;
-        cam.transform.rotation = Quaternion.Euler(45f, 45f, 0); 
-        cam.orthographic = true;
-        cam.orthographicSize = Mathf.Max(width, height) * 0.6f + 2f; 
-        cam.transform.position = -cam.transform.forward * 50f;
-    }
-    // 플레이어 회전시키는 함수
-    void RotatePlayer(int dx, int dy)
-    {
-        if (objPlayer == null) return;
-
-        // 입력받은 dx, dy를 3D 방향(x, 0, z)으로 변환
-        Vector3 direction = new Vector3(dx, 0, dy);
-
-        // 방향이 0이 아닐 때만 회전 (가만히 있을 때 0,0,0이 되면 회전값이 깨짐)
-        if (direction != Vector3.zero)
-        {
-            // "이 방향을 바라보라"는 회전값(Quaternion)을 만듭니다.
-            objPlayer.transform.rotation = Quaternion.LookRotation(direction);
-        }
-    }
+    TileData GetTileData(int id) { foreach(var d in tilePalette) if(d.tileID == id) return d; return null; }
+    void ClearMapVisuals() { if(objMap!=null) foreach(var o in transform) if(o!=objPlayer.transform && o!=transform) Destroy(((Transform)o).gameObject); }
+    IEnumerator ProcessFail() { isGameEnding=true; uiManager?.ShowFail(); yield return new WaitForSeconds(1.5f); InitializeGame(); }
+    IEnumerator ProcessClear() { isGameEnding=true; uiManager?.ShowClear(); yield return new WaitForSeconds(1.5f); currentLevelIndex++; InitializeGame(); }
+    void AutoAdjustCamera() { Camera.main.transform.position = -Camera.main.transform.forward * 50f; }
 }

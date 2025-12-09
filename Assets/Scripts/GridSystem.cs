@@ -5,12 +5,12 @@ public class GridSystem : MonoBehaviour
 {
     private int width;
     private int height;
-    private int[,] mapData; 
-    private TileData[] tilePalette;
     
-    // 바닥 ID (100번)
-    private const int FLOOR_ID = 100; 
-
+    // ★ [핵심] 3차원 배열: [x, y, layer]
+    // layer 0: Floor, 1: Object, 2: Sky
+    private int[,,] maps; 
+    
+    private TileData[] tilePalette;
     public Vector2Int PlayerIndex { get; private set; }
 
     public Action OnMapChanged;
@@ -18,92 +18,92 @@ public class GridSystem : MonoBehaviour
     public Action OnTrapTriggered;
     public Action OnGoalTriggered;
 
-    public void Initialize(int w, int h, int[,] rawIds, TileData[] palette, Vector2Int startPos)
+    // 초기화: 이제 3개의 층 데이터를 모두 받습니다.
+    public void Initialize(int w, int h, int[,,] loadedMaps, TileData[] palette, Vector2Int startPos)
     {
         width = w;
         height = h;
         tilePalette = palette;
         PlayerIndex = startPos;
+        maps = loadedMaps; // 매니저가 파싱해준 데이터를 그대로 씀 (자동 생성 X)
 
-        mapData = new int[w, h];
-        for (int x = 0; x < w; x++)
+        // 패킹 (모양 번호 추가)
+        for (int l = 0; l < 3; l++)
         {
-            for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
             {
-                int id = rawIds[x, y];
-                int variant = UnityEngine.Random.Range(0, 100);
-                mapData[x, y] = id | (variant << 16);
+                for (int y = 0; y < h; y++)
+                {
+                    int id = maps[x, y, l];
+                    if (id != 0) // 0(빈공간)이 아니면 모양 번호 추가
+                    {
+                        int variant = UnityEngine.Random.Range(0, 100);
+                        maps[x, y, l] = id | (variant << 16);
+                    }
+                }
             }
         }
     }
 
-    public int GetTileID(int x, int y)
-    {
-        if (!IsInMap(x, y)) return -1;
-        return mapData[x, y] & 0xFFFF; 
-    }
-
-    public int GetTileVariant(int x, int y)
+    // --- 데이터 조회 ---
+    public int GetLayerID(int x, int y, int layer)
     {
         if (!IsInMap(x, y)) return 0;
-        return (mapData[x, y] >> 16) & 0xFFFF; 
+        return maps[x, y, layer] & 0xFFFF; // ID 반환
+    }
+    
+    public int GetLayerVariant(int x, int y, int layer)
+    {
+        if (!IsInMap(x, y)) return 0;
+        return (maps[x, y, layer] >> 16) & 0xFFFF; // 모양 번호 반환
     }
 
     private TileData GetTileDataFromPacked(int packedData)
     {
+        if (packedData == 0) return null;
         int id = packedData & 0xFFFF;
-        foreach (var data in tilePalette)
-        {
-            if (data.tileID == id) return data;
-        }
+        foreach (var data in tilePalette) if (data.tileID == id) return data;
         return null;
     }
 
-    // ★ [헬퍼 함수] 원래 있던 타일의 모양(Variant)을 유지한 바닥 데이터를 만드는 함수
-    private int GetFloorWithVariant(int originalPackedData)
-    {
-        // 1. 원래 데이터에서 모양 번호(상위 16비트)만 추출 (0xFFFF0000)
-        int variantPart = originalPackedData & ~0xFFFF; 
-        
-        // 2. 바닥 ID(100)와 합침
-        return FLOOR_ID | variantPart;
-    }
-
-    // --- [1] 플레이어 이동 ---
+    // --- [1] 플레이어 이동 (Layer 1: Object 층에서 상호작용) ---
     public void TryMovePlayer(int dx, int dy)
     {
         int nextX = PlayerIndex.x + dx;
         int nextY = PlayerIndex.y + dy;
-
         if (!IsInMap(nextX, nextY)) return;
 
-        int nextData = mapData[nextX, nextY]; // 데이터 원본 가져오기
-        TileData nextTile = GetTileDataFromPacked(nextData);
+        // 모든 층의 벽(Stop) 확인
+        for (int l = 0; l < 3; l++)
+        {
+            TileData t = GetTileDataFromPacked(maps[nextX, nextY, l]);
+            if (t != null && t.isStop) return;
+        }
 
-        if (nextTile != null && nextTile.isPush)
+        // 상자 밀기 (Layer 1에서만 발생)
+        int layer = 1; 
+        TileData obj = GetTileDataFromPacked(maps[nextX, nextY, layer]);
+
+        if (obj != null && obj.isPush)
         {
             int pushX = nextX + dx;
             int pushY = nextY + dy;
-
             if (!IsInMap(pushX, pushY)) return;
 
-            TileData afterBox = GetTileDataFromPacked(mapData[pushX, pushY]);
-            bool canPush = (afterBox == null) || (!afterBox.isStop && !afterBox.isPush);
+            // 밀려날 곳 확인 (Layer 1의 장애물만 확인 - 같은 층 충돌)
+            TileData destObj = GetTileDataFromPacked(maps[pushX, pushY, layer]);
+            // (옵션) 바닥층(Layer 0)이 벽이면 못 밀게 할 수도 있음
+            TileData destFloor = GetTileDataFromPacked(maps[pushX, pushY, 0]);
+
+            bool canPush = (destObj == null) && (destFloor == null || !destFloor.isStop);
 
             if (canPush)
             {
-                mapData[pushX, pushY] = mapData[nextX, nextY]; 
-                
-                // ★ [수정] 상자 모양을 그대로 물려받은 바닥 생성
-                mapData[nextX, nextY] = GetFloorWithVariant(nextData); 
-                
+                maps[pushX, pushY, layer] = maps[nextX, nextY, layer]; // 이동
+                maps[nextX, nextY, layer] = 0; // 원래 자리는 0 (빈 공간)
                 OnMapChanged?.Invoke();
             }
             else return;
-        }
-        else if (nextTile != null && nextTile.isStop)
-        {
-            return;
         }
 
         PlayerIndex = new Vector2Int(nextX, nextY);
@@ -116,33 +116,37 @@ public class GridSystem : MonoBehaviour
     {
         if (!CanPushRow(PlayerIndex.y)) return;
         ShiftRow(PlayerIndex.y, -dir);
-        
-        if (!ResolveCollision(-dir, true))
-        {
-            ShiftRow(PlayerIndex.y, dir);
-        }
+        if (!ResolveCollision(-dir, true)) ShiftRow(PlayerIndex.y, dir);
     }
 
     public void TryPushCol(int dir)
     {
         if (!CanPushCol(PlayerIndex.x)) return;
         ShiftCol(PlayerIndex.x, -dir);
-
-        if (!ResolveCollision(-dir, false))
-        {
-            ShiftCol(PlayerIndex.x, dir);
-        }
+        if (!ResolveCollision(-dir, false)) ShiftCol(PlayerIndex.x, dir);
     }
 
-    // --- [3] 충돌 해결 ---
+    // --- [3] 충돌 해결 (Layer 1: Object 층이 플레이어를 밈) ---
     bool ResolveCollision(int dir, bool isRow)
     {
-        int packedData = mapData[PlayerIndex.x, PlayerIndex.y];
-        TileData incomingTile = GetTileDataFromPacked(packedData);
+        // 플레이어는 Layer 1에 서 있으므로, Layer 1의 충돌을 최우선으로 처리
+        if (!HandleLayerCollision(1, dir, isRow)) return false;
+        
+        // (필요 시 Layer 2의 충돌도 처리 가능 - 예: 날아다니는 적)
+        // if (!HandleLayerCollision(2, dir, isRow)) return false; 
 
-        if (incomingTile == null) { CheckFoot(); return true; }
+        CheckFoot();
+        return true;
+    }
 
-        if (incomingTile.isStop)
+    bool HandleLayerCollision(int layer, int dir, bool isRow)
+    {
+        int packedData = maps[PlayerIndex.x, PlayerIndex.y, layer];
+        TileData tile = GetTileDataFromPacked(packedData);
+
+        if (tile == null) return true; // 빈 공간이면 통과
+
+        if (tile.isStop) // 벽 -> 플레이어 밀기
         {
             int newX = PlayerIndex.x + (isRow ? dir : 0);
             int newY = PlayerIndex.y + (isRow ? 0 : dir);
@@ -151,21 +155,15 @@ public class GridSystem : MonoBehaviour
             {
                 PlayerIndex = new Vector2Int(newX, newY);
                 OnPlayerMoved?.Invoke();
-                CheckFoot();
                 return true;
             }
-            else
-            {
-                Debug.Log("맵 밖 회전 취소");
-                return false; 
-            }
+            else return false;
         }
-        else if (incomingTile.isPush)
+        else if (tile.isPush) // 상자 -> 역주행
         {
-            // ★ [수정] 내가 버티고 서 있는 자리는 (상자 모양을 물려받은) 바닥이어야 함
-            mapData[PlayerIndex.x, PlayerIndex.y] = GetFloorWithVariant(packedData);
-
-            int boxToSave = packedData;
+            maps[PlayerIndex.x, PlayerIndex.y, layer] = 0; 
+            int itemToSave = packedData;
+            
             int checkX = PlayerIndex.x;
             int checkY = PlayerIndex.y;
             int loopCount = isRow ? width : height;
@@ -175,84 +173,99 @@ public class GridSystem : MonoBehaviour
                 if (isRow) checkX = GetWrappedIndex(checkX - dir, width);
                 else       checkY = GetWrappedIndex(checkY - dir, height);
 
-                int prevData = mapData[checkX, checkY];
-                TileData prevTile = GetTileDataFromPacked(prevData);
+                TileData dest = GetTileDataFromPacked(maps[checkX, checkY, layer]);
 
-                if (prevTile != null && prevTile.isStop) break;
-                else if (prevTile == null || (!prevTile.isStop && !prevTile.isPush))
+                if (dest != null && dest.isStop) break;
+                else if (dest == null)
                 {
-                    mapData[checkX, checkY] = boxToSave;
+                    maps[checkX, checkY, layer] = itemToSave;
                     break;
                 }
-                else if (prevTile.isPush)
+                else if (dest.isPush)
                 {
-                    mapData[checkX, checkY] = boxToSave;
-                    boxToSave = prevData;
+                    int temp = maps[checkX, checkY, layer];
+                    maps[checkX, checkY, layer] = itemToSave;
+                    itemToSave = temp;
                 }
             }
             OnMapChanged?.Invoke();
-            CheckFoot();
             return true;
         }
-        
-        CheckFoot();
         return true;
     }
 
     void CheckFoot()
     {
-        TileData t = GetTileDataFromPacked(mapData[PlayerIndex.x, PlayerIndex.y]);
-        if (t == null) return;
-        if (t.isDead) OnTrapTriggered?.Invoke();
-        else if (t.isGoal) OnGoalTriggered?.Invoke();
+        TileData f = GetTileDataFromPacked(maps[PlayerIndex.x, PlayerIndex.y, 1]); // Layer 0 확인
+        if (f != null)
+        {
+            if (f.isDead) OnTrapTriggered?.Invoke();
+            if (f.isGoal) OnGoalTriggered?.Invoke();
+        }
     }
 
     bool CanPushRow(int y)
     {
         for (int x = 0; x < width; x++)
-        {
-            TileData t = GetTileDataFromPacked(mapData[x, y]);
-            if (t != null && !t.isShift) return false;
-        }
+            for (int l = 0; l < 3; l++) // 3개 층 모두 검사
+                if (IsFixed(x, y, l)) return false;
         return true;
     }
 
     bool CanPushCol(int x)
     {
         for (int y = 0; y < height; y++)
-        {
-            TileData t = GetTileDataFromPacked(mapData[x, y]);
-            if (t != null && !t.isShift) return false;
-        }
+            for (int l = 0; l < 3; l++)
+                if (IsFixed(x, y, l)) return false;
         return true;
+    }
+
+    bool IsFixed(int x, int y, int l)
+    {
+        TileData t = GetTileDataFromPacked(maps[x, y, l]);
+        return t != null && !t.isShift;
     }
 
     void ShiftRow(int y, int dir)
     {
-        if (dir == 1) {
-            int last = mapData[width - 1, y];
-            for (int x = width - 1; x > 0; x--) mapData[x, y] = mapData[x - 1, y];
-            mapData[0, y] = last;
-        } else {
-            int first = mapData[0, y];
-            for (int x = 0; x < width - 1; x++) mapData[x, y] = mapData[x + 1, y];
-            mapData[width - 1, y] = first;
-        }
+        for(int l=0; l<3; l++) ShiftArray(l, y, dir, true);
         OnMapChanged?.Invoke();
     }
 
     void ShiftCol(int x, int dir)
     {
-        if (dir == 1) {
-            int last = mapData[x, height - 1];
-            for (int y = height - 1; y > 0; y--) mapData[x, y] = mapData[x, y - 1];
-            mapData[x, 0] = last;
-        } else {
-            int first = mapData[x, 0];
-            for (int y = 0; y < height - 1; y++) mapData[x, y] = mapData[x, y + 1];
-            mapData[x, height - 1] = first;
-        }
+        for(int l=0; l<3; l++) ShiftArray(l, x, dir, false);
         OnMapChanged?.Invoke();
+    }
+
+    void ShiftArray(int layer, int targetIndex, int dir, bool isRow)
+    {
+        if (isRow)
+        {
+            int y = targetIndex;
+            if (dir == 1) {
+                int last = maps[width - 1, y, layer];
+                for (int x = width - 1; x > 0; x--) maps[x, y, layer] = maps[x - 1, y, layer];
+                maps[0, y, layer] = last;
+            } else {
+                int first = maps[0, y, layer];
+                for (int x = 0; x < width - 1; x++) maps[x, y, layer] = maps[x + 1, y, layer];
+                maps[width - 1, y, layer] = first;
+            }
+        }
+        else
+        {
+            int x = targetIndex;
+            if (dir == 1) {
+                int last = maps[x, height - 1, layer];
+                for (int y = height - 1; y > 0; y--) maps[x, y, layer] = maps[x, y - 1, layer];
+                maps[x, 0, layer] = last;
+            } else {
+                int first = maps[x, 0, layer];
+                for (int y = 0; y < height - 1; y++) maps[x, y, layer] = maps[x, y + 1, layer];
+                maps[x, height - 1, layer] = first;
+            }
+        }
     }
 
     bool IsInMap(int x, int y) => x >= 0 && x < width && y >= 0 && y < height;
