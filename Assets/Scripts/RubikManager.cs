@@ -315,24 +315,42 @@ public void TryPushRow(int dir)
 
     void ClearMapVisuals() { if (objMap != null) foreach (var obj in objMap) if (obj != null) Destroy(obj); }
     
+// [수정] 가로줄 전체 검사 (고정된 타일이 하나라도 있으면 회전 불가)
     bool CanPushRow(int y, int lookDir)
     {
-        int checkX = playerIndex.x + lookDir;
-        if (checkX >= width) checkX = 0;
-        if (checkX < 0) checkX = width - 1;
-
-        TileData t = GetTileData(mapData[checkX, y]);
-        return t != null && t.isShift; 
+        // 줄 전체(width)를 돌면서 확인
+        for (int x = 0; x < width; x++)
+        {
+            TileData t = GetTileData(mapData[x, y]);
+            
+            // 데이터가 있는데 isShift가 꺼져있다? -> 고정축(Anchor) 발견!
+            // 벽(Wall)이 하나라도 있으면 그 줄은 못 돌림
+            if (t != null && !t.isShift)
+            {
+                Debug.Log($"({x},{y}) 위치의 고정 타일 때문에 회전 불가!");
+                return false; 
+            }
+        }
+        
+        // 고정된 타일이 하나도 없으면 회전 승인
+        return true; 
     }
 
+    // [수정] 세로줄 전체 검사
     bool CanPushCol(int x, int lookDir)
     {
-        int checkY = playerIndex.y + lookDir;
-        if (checkY >= height) checkY = 0;
-        if (checkY < 0) checkY = height - 1;
+        for (int y = 0; y < height; y++)
+        {
+            TileData t = GetTileData(mapData[x, y]);
 
-        TileData t = GetTileData(mapData[x, checkY]);
-        return t != null && t.isShift;
+            // 고정축 발견 시 회전 불가
+            if (t != null && !t.isShift)
+            {
+                Debug.Log($"({x},{y}) 위치의 고정 타일 때문에 회전 불가!");
+                return false;
+            }
+        }
+        return true;
     }
 
     void UpdateView()
