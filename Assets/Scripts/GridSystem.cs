@@ -17,7 +17,7 @@ public class GridSystem : MonoBehaviour
     public Action OnPlayerMoved;
     public Action OnTrapTriggered;
     public Action OnGoalTriggered;
-
+    private const int PLAYER_LAYER = 1;
     // 초기화: 이제 3개의 층 데이터를 모두 받습니다.
     public void Initialize(int w, int h, int[,,] loadedMaps, TileData[] palette, Vector2Int startPos)
     {
@@ -196,14 +196,19 @@ public class GridSystem : MonoBehaviour
 
     void CheckFoot()
     {
-        TileData f = GetTileDataFromPacked(maps[PlayerIndex.x, PlayerIndex.y, 1]); // Layer 0 확인
-        if (f != null)
+       int myLayerData = maps[PlayerIndex.x, PlayerIndex.y, PLAYER_LAYER];
+
+        CheckLayerEvent(myLayerData);
+    }
+    void CheckLayerEvent(int packedData)
+    {
+        TileData t = GetTileDataFromPacked(packedData);
+        if (t != null)
         {
-            if (f.isDead) OnTrapTriggered?.Invoke();
-            if (f.isGoal) OnGoalTriggered?.Invoke();
+            if (t.isDead) OnTrapTriggered?.Invoke();
+            if (t.isGoal) OnGoalTriggered?.Invoke();
         }
     }
-
     bool CanPushRow(int y)
     {
         for (int x = 0; x < width; x++)

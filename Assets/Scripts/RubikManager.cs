@@ -125,26 +125,34 @@ public class RubikManager : MonoBehaviour
         }
     }
 
-    void CreateObj(int id, int var, Vector3 pos, int layer, int x, int y) {
+void CreateObj(int id, int var, Vector3 pos, int layer, int x, int y)
+    {
         TileData d = GetTileData(id);
-        if (d != null) {
+        if (d != null)
+        {
             VisualVariant v = d.GetVariantByWeight(var);
-            if (v.prefab != null) {
+            if (v.prefab != null)
+            {
                 GameObject go = Instantiate(v.prefab, pos, Quaternion.Euler(v.rotation));
-                if(v.overrideMat != null) {
+                if (v.overrideMat != null)
+                {
                     Renderer r = go.GetComponentInChildren<Renderer>();
-                    if(r) r.material = v.overrideMat;
+                    if (r) r.material = v.overrideMat;
                 }
                 go.transform.parent = transform;
-                
+
                 float hm = (layer == 0) ? 1.0f : d.heightMultiplier;
                 float h = tileHeight * hm;
                 go.transform.localScale = new Vector3(tileSizeXZ, h, tileSizeXZ);
-                
-                float yOff = (layer == 0) ? 0 : (layer == 1 ? tileHeight : tileHeight * 3); // 층 간격 (2층은 좀 더 높게)
-                go.transform.position += Vector3.up * (yOff + h/2f);
 
-                if(layer == 1) objMap[x, y] = go; 
+                // ★ [핵심 수정] 
+                // Layer 2(공중)만 높게 띄우고, Layer 0(바닥)과 Layer 1(물체)은 바닥(0)에 붙입니다.
+                float yOff = (layer == 2) ? tileHeight * 3.0f : 0;
+
+                // 최종 위치: (오프셋 + 자기 높이의 절반)
+                go.transform.position += Vector3.up * (yOff + h / 2f);
+
+                if (layer == 1) objMap[x, y] = go;
             }
         }
     }

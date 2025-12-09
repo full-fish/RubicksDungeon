@@ -12,11 +12,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 23cf917c0269ed14cb41eaae5ed0028f, type: 3}
   m_Name: Data_Trap
   m_EditorClassIdentifier: Assembly-CSharp::TileData
-  tileID: 2
+  tileID: 400
   variants:
   - prefab: {fileID: 919132149155446097, guid: 74d7e9eef2b4ff44e80ca8b50669e919, type: 3}
+    overrideMat: {fileID: 2100000, guid: 8acfae20f9a13874ab6a389246361f4a, type: 2}
+    rotation: {x: 0, y: 0, z: 0}
     chance: 100
-  hasFloorUnder: 1
+  layerType: 1
+  heightMultiplier: 1
   isStop: 0
   isPush: 0
   isShift: 1
