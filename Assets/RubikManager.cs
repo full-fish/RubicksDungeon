@@ -1,14 +1,16 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using System; 
+using System.Collections.Generic;
 
 public class RubikManager : MonoBehaviour
 {
     [Header("테스트 기능")]
     public bool reloadMap = false;
 
-    [Header("맵 설정")]
-    public int width = 5;
-    public int height = 5;
+    [Header("레벨 파일 (.txt) 등록")]
+    public TextAsset[] levelFiles; 
+    public int currentLevelIndex = 0; 
 
     [Header("비주얼 설정")]
     [Range(0.5f, 1.0f)] public float tileSizeXZ = 0.8f;
@@ -23,12 +25,14 @@ public class RubikManager : MonoBehaviour
     public GameObject prefabPlayer;      
 
     // 데이터
+    private int width;
+    private int height;
     private int[,] mapData;
     private Vector2Int playerIndex;
+    
     private GameObject[,] objMap;
     private GameObject objPlayer;
 
-    // 변경 감지용
     private float _lastSizeXZ;
     private float _lastHeight;
 
@@ -46,7 +50,6 @@ public class RubikManager : MonoBehaviour
             return;
         }
 
-        // 비주얼 실시간 반영
         if (tileSizeXZ != _lastSizeXZ || tileHeight != _lastHeight)
         {
             SyncVisuals();
@@ -58,65 +61,90 @@ public class RubikManager : MonoBehaviour
         HandleInput();
     }
 
-    // ★ 게임 시작/재시작을 담당하는 함수 (순서 중요!)
     void InitializeGame()
     {
-        // 1. 기존에 있던 맵 오브젝트 싹 지우기 (유령 타일 방지)
         ClearMapVisuals();
-
-        // 2. 데이터 생성
-        GenerateMap();
-
-        // 3. 맵 화면 그리기
+        LoadMapFromFile(); 
         UpdateView();
-
-        // 4. 플레이어 위치 잡기 (★ 버그 1번 해결: 여기서 강제로 중앙으로 옮김)
         UpdatePlayerPosition();
-
-        // 5. 카메라 잡기
         AutoAdjustCamera();
 
         _lastSizeXZ = tileSizeXZ;
         _lastHeight = tileHeight;
     }
 
-    // ★ 화면에 있는 타일들을 깨끗이 지우는 함수
-    void ClearMapVisuals()
+    void LoadMapFromFile()
     {
-        if (objMap != null)
+        if (levelFiles == null || levelFiles.Length == 0)
         {
-            foreach (var obj in objMap)
+            Debug.LogError("레벨 파일이 없습니다! Inspector에서 등록해주세요.");
+            return;
+        }
+
+        if (currentLevelIndex >= levelFiles.Length) 
+        {
+            Debug.Log("모든 레벨 클리어! 다시 1탄으로 돌아갑니다.");
+            currentLevelIndex = 0; 
+        }
+        
+        string textData = levelFiles[currentLevelIndex].text;
+        string[] lines = textData.Replace("\r", "").Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+        height = lines.Length; 
+        width = lines[0].Trim().Split(' ').Length; 
+
+        mapData = new int[width, height];
+        objMap = new GameObject[width, height];
+
+        for (int y = 0; y < height; y++)
+        {
+            string[] numbers = lines[height - 1 - y].Trim().Split(' '); 
+
+            for (int x = 0; x < width; x++)
             {
-                if (obj != null) Destroy(obj);
+                if (x < numbers.Length)
+                {
+                    int tileID = int.Parse(numbers[x]);
+                    mapData[x, y] = tileID;
+                }
             }
+        }
+
+        playerIndex = new Vector2Int(width / 2, height / 2);
+        mapData[playerIndex.x, playerIndex.y] = 0;
+
+        Debug.Log($"=== 레벨 {currentLevelIndex + 1} 시작 ===");
+    }
+
+    // ★ 함정과 상자 처리 (질문 3, 4 해결)
+    void CheckFoot()
+    {
+        int type = mapData[playerIndex.x, playerIndex.y];
+
+        if (type == 2) 
+        {
+            Debug.Log("☠️ 으악! 함정(2)을 밟았습니다! (재시작)");
+            InitializeGame(); // 현재 레벨 재시작
+        }
+        else if (type == 4) 
+        {
+            Debug.Log("🎉 상자(4) 획득! 다음 레벨로 이동합니다!");
+            currentLevelIndex++; // 레벨 번호 증가
+            InitializeGame();    // 다음 레벨 로드
         }
     }
 
     void HandleInput()
     {
-        // 1. 이동
         if (Keyboard.current.rightArrowKey.wasPressedThisFrame) AttemptMove(1, 0);
         if (Keyboard.current.leftArrowKey.wasPressedThisFrame)  AttemptMove(-1, 0);
         if (Keyboard.current.upArrowKey.wasPressedThisFrame)    AttemptMove(0, 1);
         if (Keyboard.current.downArrowKey.wasPressedThisFrame)  AttemptMove(0, -1);
 
-        // 2. 밀기
-        if (Keyboard.current.dKey.wasPressedThisFrame) 
-        {
-            if (CanPushRow(playerIndex.y, 1)) ShiftRow(playerIndex.y, -1);
-        }
-        if (Keyboard.current.aKey.wasPressedThisFrame)
-        {
-            if (CanPushRow(playerIndex.y, -1)) ShiftRow(playerIndex.y, 1);
-        }
-        if (Keyboard.current.sKey.wasPressedThisFrame)
-        {
-            if (CanPushCol(playerIndex.x, 1)) ShiftCol(playerIndex.x, -1);
-        }
-        if (Keyboard.current.wKey.wasPressedThisFrame)
-        {
-            if (CanPushCol(playerIndex.x, -1)) ShiftCol(playerIndex.x, 1);
-        }
+        if (Keyboard.current.dKey.wasPressedThisFrame) { if (CanPushRow(playerIndex.y, 1)) ShiftRow(playerIndex.y, -1); }
+        if (Keyboard.current.aKey.wasPressedThisFrame) { if (CanPushRow(playerIndex.y, -1)) ShiftRow(playerIndex.y, 1); }
+        if (Keyboard.current.sKey.wasPressedThisFrame) { if (CanPushCol(playerIndex.x, 1)) ShiftCol(playerIndex.x, -1); }
+        if (Keyboard.current.wKey.wasPressedThisFrame) { if (CanPushCol(playerIndex.x, -1)) ShiftCol(playerIndex.x, 1); }
     }
 
     void AttemptMove(int dx, int dy)
@@ -124,140 +152,36 @@ public class RubikManager : MonoBehaviour
         int nextX = playerIndex.x + dx;
         int nextY = playerIndex.y + dy;
 
-        if (nextX < 0 || nextX >= width || nextY < 0 || nextY >= height) return;
+        if (nextX < 0 || nextX >= width || nextY < 0 || nextY >= height) 
+        {
+            Debug.Log("맵 밖으로는 못 갑니다.");
+            return;
+        }
 
-        // 벽 체크 (1번)
         if (mapData[nextX, nextY] == 1) 
         {
-            Debug.Log("벽입니다.");
+            Debug.Log("벽(1)에 막혔습니다.");
             return; 
         }
+
+        // ★ 이동 로그 추가 (질문 2)
+        Debug.Log($"이동함: ({playerIndex.x}, {playerIndex.y}) -> ({nextX}, {nextY})");
 
         playerIndex = new Vector2Int(nextX, nextY);
         UpdatePlayerPosition();
         CheckFoot();
     }
 
-    // ★ 발밑 확인 (수정됨)
-    void CheckFoot()
-    {
-        int type = mapData[playerIndex.x, playerIndex.y];
-
-        if (type == 2) 
-        {
-            Debug.Log("으악! 함정(2)을 밟았다!");
-            // 여기서 사망 처리 가능
-        }
-        else if (type == 4) 
-        {
-            Debug.Log("★ 상자 획득! 다음 레벨로! ★");
-            // 상자를 먹었으니 바로 게임 재설정 (다음 판)
-            InitializeGame(); 
-        }
-    }
-
-    // --- 나머지 함수들은 기존과 동일하지만, UpdateView에서 Clear 로직을 InitializeGame으로 뺐으므로 확인 필요 ---
-
-    void GenerateMap()
-    {
-        mapData = new int[width, height];
-        objMap = new GameObject[width, height];
-        
-        playerIndex = new Vector2Int(width / 2, height / 2);
-
-        for (int x = 0; x < width; x++)
-        {
-            for (int y = 0; y < height; y++)
-            {
-                if (x == 0 || y == 0 || x == width - 1 || y == height - 1)
-                    mapData[x, y] = 1; 
-                else
-                {
-                    int rand = Random.Range(0, 100);
-                    if (rand < 10) mapData[x, y] = 1;      
-                    else if (rand < 20) mapData[x, y] = 2; 
-                    else if (rand < 40) mapData[x, y] = 3; 
-                    else mapData[x, y] = 0;                
-                }
-            }
-        }
-        mapData[playerIndex.x, playerIndex.y] = 0; 
-        
-        // 상자(4) 배치
-        int cx = Random.Range(1, width-1);
-        int cy = Random.Range(1, height-1);
-        // 플레이어 위치나 벽이면 다시 뽑기 (간단한 예외처리)
-        while (mapData[cx, cy] == 1 || (cx == playerIndex.x && cy == playerIndex.y))
-        {
-            cx = Random.Range(1, width-1);
-            cy = Random.Range(1, height-1);
-        }
-        mapData[cx, cy] = 4;
-    }
-
-    void UpdateView()
-    {
-        // ★ 중요: 여기서 Destroy를 또 하면 낭비일 수 있지만, 
-        // Shift(밀기) 할 때는 전체 갱신이 필요하므로 유지합니다.
-        ClearMapVisuals();
-
-        float offsetX = width / 2f - 0.5f;
-        float offsetZ = height / 2f - 0.5f;
-
-        for (int x = 0; x < width; x++)
-        {
-            for (int y = 0; y < height; y++)
-            {
-                int type = mapData[x, y];
-                GameObject prefab = prefabFloor;
-
-                if (type == 1) prefab = prefabWall;
-                else if (type == 2) prefab = prefabTrap;
-                else if (type == 3) prefab = prefabFloorDetail;
-                else if (type == 4) prefab = prefabChest;
-
-                Vector3 pos = new Vector3(x - offsetX, 0, y - offsetZ);
-                GameObject newObj = Instantiate(prefab, pos, Quaternion.identity);
-                newObj.transform.parent = transform;
-                
-                // 모양 잡기
-                newObj.transform.localScale = new Vector3(tileSizeXZ, tileHeight, tileSizeXZ);
-                newObj.transform.position += Vector3.up * (tileHeight / 2f);
-
-                objMap[x, y] = newObj;
-            }
-        }
-    }
-
-    void UpdatePlayerPosition()
-    {
-        if (objPlayer == null)
-        {
-            objPlayer = Instantiate(prefabPlayer);
-            objPlayer.transform.parent = transform;
-        }
-        
-        // ★ 플레이어 크기도 비주얼 설정에 맞게
-        objPlayer.transform.localScale = new Vector3(1f, 1f, 1f); 
-
-        float offsetX = width / 2f - 0.5f;
-        float offsetZ = height / 2f - 0.5f;
-        
-        Vector3 pos = new Vector3(playerIndex.x - offsetX, tileHeight, playerIndex.y - offsetZ);
-        objPlayer.transform.position = pos;
-    }
-
-    // --- Shift 로직 ---
     public void ShiftRow(int y, int dir)
     {
-        if (dir == 1) 
-        {
+        // ★ 밀기 로그 추가 (질문 2)
+        Debug.Log($"가로줄({y})을 {(dir == 1 ? "오른쪽" : "왼쪽")}으로 밀었습니다.");
+
+        if (dir == 1) {
             int last = mapData[width - 1, y];
             for (int x = width - 1; x > 0; x--) mapData[x, y] = mapData[x - 1, y];
             mapData[0, y] = last;
-        }
-        else 
-        {
+        } else {
             int first = mapData[0, y];
             for (int x = 0; x < width - 1; x++) mapData[x, y] = mapData[x + 1, y];
             mapData[width - 1, y] = first;
@@ -268,14 +192,14 @@ public class RubikManager : MonoBehaviour
 
     public void ShiftCol(int x, int dir)
     {
-        if (dir == 1) 
-        {
+        // ★ 밀기 로그 추가 (질문 2)
+        Debug.Log($"세로줄({x})을 {(dir == 1 ? "위" : "아래")}로 밀었습니다.");
+
+        if (dir == 1) {
             int last = mapData[x, height - 1];
             for (int y = height - 1; y > 0; y--) mapData[x, y] = mapData[x, y - 1];
             mapData[x, 0] = last;
-        }
-        else 
-        {
+        } else {
             int first = mapData[x, 0];
             for (int y = 0; y < height - 1; y++) mapData[x, y] = mapData[x, y + 1];
             mapData[x, height - 1] = first;
@@ -284,6 +208,10 @@ public class RubikManager : MonoBehaviour
         CheckFoot();
     }
 
+    // --- 아래는 기존과 동일한 보조 함수들 ---
+    
+    void ClearMapVisuals() { if (objMap != null) foreach (var obj in objMap) if (obj != null) Destroy(obj); }
+    
     bool CanPushRow(int y, int lookDir)
     {
         int checkX = playerIndex.x + lookDir;
@@ -300,9 +228,50 @@ public class RubikManager : MonoBehaviour
         return mapData[x, checkY] != 1;
     }
 
+    void UpdateView()
+    {
+        ClearMapVisuals();
+        float offsetX = width / 2f - 0.5f;
+        float offsetZ = height / 2f - 0.5f;
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                int type = mapData[x, y];
+                GameObject prefab = prefabFloor;
+                if (type == 1) prefab = prefabWall;
+                else if (type == 2) prefab = prefabTrap;
+                else if (type == 3) prefab = prefabFloorDetail;
+                else if (type == 4) prefab = prefabChest;
+
+                Vector3 pos = new Vector3(x - offsetX, 0, y - offsetZ);
+                GameObject newObj = Instantiate(prefab, pos, Quaternion.identity);
+                newObj.transform.parent = transform;
+                newObj.transform.localScale = new Vector3(tileSizeXZ, tileHeight, tileSizeXZ);
+                newObj.transform.position += Vector3.up * (tileHeight / 2f);
+                objMap[x, y] = newObj;
+            }
+        }
+        SyncVisuals();
+    }
+
+    void UpdatePlayerPosition()
+    {
+        if (objPlayer == null)
+        {
+            objPlayer = Instantiate(prefabPlayer);
+            objPlayer.transform.parent = transform;
+        }
+        objPlayer.transform.localScale = new Vector3(1f, 1f, 1f);
+        float offsetX = width / 2f - 0.5f;
+        float offsetZ = height / 2f - 0.5f;
+        Vector3 pos = new Vector3(playerIndex.x - offsetX, tileHeight, playerIndex.y - offsetZ);
+        objPlayer.transform.position = pos;
+    }
+
     void SyncVisuals()
     {
-        // (기존 SyncVisuals 코드 유지)
         if (objMap == null) return;
         if (objPlayer != null)
         {
