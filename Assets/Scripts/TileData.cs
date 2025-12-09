@@ -12,9 +12,6 @@ public class TileData : ScriptableObject
     [Tooltip("1이면 매니저 설정 그대로, 2면 2배 높게, 0.5면 절반 높이")]
     public float heightMultiplier = 1.0f;
       
-    [Header("옵션")]
-    [Tooltip("체크하면 이 타일 밑에 기본 바닥(ID:0)을 먼저 깝니다.")]
-    public bool hasFloorUnder; 
 
     [Header("이동 관련")]
     public bool isStop;       // 벽 (고정)

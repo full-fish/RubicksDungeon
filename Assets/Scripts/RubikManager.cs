@@ -147,45 +147,6 @@ public class RubikManager : MonoBehaviour
                     // ★ [계산] 이 타일의 최종 높이 = 기본 높이 * 개별 배율
                     float myHeight = tileHeight * data.heightMultiplier;
 
-                    // 1. 밑바닥 깔기 (바닥은 항상 기본 높이 tileHeight 사용)
-                    if (data.hasFloorUnder && baseFloorData != null)
-                    {
-                        VisualVariant floorVar = baseFloorData.GetVariantByWeight(variantNum);
-                        if (floorVar.prefab != null)
-                        {
-                            // 메인 오브젝트 생성
-                            VisualVariant mainVar = data.GetVariantByWeight(variantNum);
-                            GameObject mainObj = Instantiate(mainVar.prefab, pos, Quaternion.identity);
-                            ApplyMaterial(mainObj, mainVar.overrideMat);
-
-                            mainObj.transform.parent = transform;
-                            // ★ 높이 적용 (myHeight)
-                            mainObj.transform.localScale = new Vector3(tileSizeXZ, myHeight, tileSizeXZ);
-                            mainObj.transform.position += Vector3.up * (myHeight / 2f);
-
-                            // 바닥 생성
-                            GameObject floorObj = Instantiate(floorVar.prefab, pos, Quaternion.identity);
-                            ApplyMaterial(floorObj, floorVar.overrideMat);
-
-                            floorObj.transform.SetParent(mainObj.transform);
-                            
-                            // 바닥 크기 보정 (부모가 커졌으면 자식은 작아져야 원래 크기 유지)
-                            // 부모 높이가 2배면, 자식 Y스케일은 0.5여야 함
-                            float inverseScale = 1.0f / data.heightMultiplier;
-                            floorObj.transform.localScale = new Vector3(1, inverseScale, 1);
-                            
-                            // 바닥 위치를 발밑(y=0)으로 내리기
-                            // 부모의 Pivot이 중앙이라 자식 위치 잡기가 까다로울 수 있음.
-                            // 가장 쉬운 건 바닥은 그냥 (0, -0.5, 0) 근처로 내리는 것인데, 
-                            // 일단 scale만 맞춰도 묻혀서 안 보일 일은 줄어듭니다.
-                            floorObj.transform.localPosition = new Vector3(0, -0.5f + (0.5f * inverseScale), 0); 
-
-                            objMap[x, y] = mainObj;
-                            continue;
-                        }
-                    }
-
-                    // 2. 일반 생성
                     VisualVariant v = data.GetVariantByWeight(variantNum);
                     if (v.prefab != null)
                     {
