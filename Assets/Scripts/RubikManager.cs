@@ -93,16 +93,33 @@ public class RubikManager : MonoBehaviour
         int[,] mapData = new int[width, height];
         objMap = new GameObject[width, height];
 
+        // 기본값은 중앙이지만, 0번을 찾으면 바뀔 예정
+        Vector2Int startPos = new Vector2Int(width / 2, height / 2); 
+
         for (int y = 0; y < height; y++)
         {
             string[] numbers = lines[height - 1 - y].Trim().Split(' '); 
             for (int x = 0; x < width; x++)
             {
-                if (x < numbers.Length) mapData[x, y] = int.Parse(numbers[x]);
+                if (x < numbers.Length) 
+                {
+                    int parsedID = int.Parse(numbers[x]);
+
+                    // ★ [핵심 수정] 맵 파일에서 0(플레이어)을 발견하면?
+                    if (parsedID == 0)
+                    {
+                        startPos = new Vector2Int(x, y); // 시작 위치로 등록
+                        mapData[x, y] = 100; // 그 자리는 '기본 바닥(100)'으로 채움
+                    }
+                    else
+                    {
+                        mapData[x, y] = parsedID; // 나머지는 그대로 저장
+                    }
+                }
             }
         }
-        Vector2Int startPos = new Vector2Int(width / 2, height / 2);
-        mapData[startPos.x, startPos.y] = 0; 
+        
+        // [삭제됨] mapData[startPos.x, startPos.y] = 0; <- 이 강제 초기화 코드는 삭제했습니다.
 
         gridSystem.Initialize(width, height, mapData, tilePalette, startPos);
     }
@@ -113,7 +130,7 @@ public class RubikManager : MonoBehaviour
         float offsetX = width / 2f - 0.5f;
         float offsetZ = height / 2f - 0.5f;
 
-        TileData baseFloorData = GetTileData(0);
+        TileData baseFloorData = GetTileData(100);
 
         for (int x = 0; x < width; x++)
         {

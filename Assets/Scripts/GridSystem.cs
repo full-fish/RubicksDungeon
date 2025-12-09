@@ -5,9 +5,12 @@ public class GridSystem : MonoBehaviour
 {
     private int width;
     private int height;
-    private int[,] mapData; // [ID + 모양번호] 패킹된 데이터
+    private int[,] mapData; 
     private TileData[] tilePalette;
     
+    // 바닥 ID (100번)
+    private const int FLOOR_ID = 100; 
+
     public Vector2Int PlayerIndex { get; private set; }
 
     public Action OnMapChanged;
@@ -22,7 +25,6 @@ public class GridSystem : MonoBehaviour
         tilePalette = palette;
         PlayerIndex = startPos;
 
-        // ID에 랜덤 모양 번호(0~99)를 섞어서 저장
         mapData = new int[w, h];
         for (int x = 0; x < w; x++)
         {
@@ -35,17 +37,16 @@ public class GridSystem : MonoBehaviour
         }
     }
 
-    // --- 데이터 조회용 ---
     public int GetTileID(int x, int y)
     {
         if (!IsInMap(x, y)) return -1;
-        return mapData[x, y] & 0xFFFF; // 하위 16비트 (ID)
+        return mapData[x, y] & 0xFFFF; 
     }
 
     public int GetTileVariant(int x, int y)
     {
         if (!IsInMap(x, y)) return 0;
-        return (mapData[x, y] >> 16) & 0xFFFF; // 상위 16비트 (모양 번호)
+        return (mapData[x, y] >> 16) & 0xFFFF; 
     }
 
     private TileData GetTileDataFromPacked(int packedData)
@@ -58,7 +59,17 @@ public class GridSystem : MonoBehaviour
         return null;
     }
 
-    // --- [1] 플레이어 이동 (1개만 밀기) ---
+    // ★ [헬퍼 함수] 원래 있던 타일의 모양(Variant)을 유지한 바닥 데이터를 만드는 함수
+    private int GetFloorWithVariant(int originalPackedData)
+    {
+        // 1. 원래 데이터에서 모양 번호(상위 16비트)만 추출 (0xFFFF0000)
+        int variantPart = originalPackedData & ~0xFFFF; 
+        
+        // 2. 바닥 ID(100)와 합침
+        return FLOOR_ID | variantPart;
+    }
+
+    // --- [1] 플레이어 이동 ---
     public void TryMovePlayer(int dx, int dy)
     {
         int nextX = PlayerIndex.x + dx;
@@ -66,9 +77,9 @@ public class GridSystem : MonoBehaviour
 
         if (!IsInMap(nextX, nextY)) return;
 
-        TileData nextTile = GetTileDataFromPacked(mapData[nextX, nextY]);
+        int nextData = mapData[nextX, nextY]; // 데이터 원본 가져오기
+        TileData nextTile = GetTileDataFromPacked(nextData);
 
-        // 상자 밀기 시도
         if (nextTile != null && nextTile.isPush)
         {
             int pushX = nextX + dx;
@@ -77,19 +88,19 @@ public class GridSystem : MonoBehaviour
             if (!IsInMap(pushX, pushY)) return;
 
             TileData afterBox = GetTileDataFromPacked(mapData[pushX, pushY]);
-            
-            // 상자 뒤가 비어있거나, 장애물(Stop/Push)이 없어야 밀림
             bool canPush = (afterBox == null) || (!afterBox.isStop && !afterBox.isPush);
 
             if (canPush)
             {
-                mapData[pushX, pushY] = mapData[nextX, nextY]; // 데이터 이동
-                mapData[nextX, nextY] = 0; // 내 자리는 0(바닥)으로
+                mapData[pushX, pushY] = mapData[nextX, nextY]; 
+                
+                // ★ [수정] 상자 모양을 그대로 물려받은 바닥 생성
+                mapData[nextX, nextY] = GetFloorWithVariant(nextData); 
+                
                 OnMapChanged?.Invoke();
             }
-            else return; // 뒤가 막힘
+            else return;
         }
-        // 벽이면 이동 불가
         else if (nextTile != null && nextTile.isStop)
         {
             return;
@@ -100,49 +111,65 @@ public class GridSystem : MonoBehaviour
         CheckFoot();
     }
 
-    // --- [2] 맵 회전 (WASD) ---
+    // --- [2] 맵 회전 ---
     public void TryPushRow(int dir)
     {
         if (!CanPushRow(PlayerIndex.y)) return;
         ShiftRow(PlayerIndex.y, -dir);
-        ResolveCollision(-dir, true);
+        
+        if (!ResolveCollision(-dir, true))
+        {
+            ShiftRow(PlayerIndex.y, dir);
+        }
     }
 
     public void TryPushCol(int dir)
     {
         if (!CanPushCol(PlayerIndex.x)) return;
         ShiftCol(PlayerIndex.x, -dir);
-        ResolveCollision(-dir, false);
+
+        if (!ResolveCollision(-dir, false))
+        {
+            ShiftCol(PlayerIndex.x, dir);
+        }
     }
 
-    // --- [3] 충돌 해결 (벽은 플레이어를 밀고, 상자는 역주행) ---
-    void ResolveCollision(int dir, bool isRow)
+    // --- [3] 충돌 해결 ---
+    bool ResolveCollision(int dir, bool isRow)
     {
         int packedData = mapData[PlayerIndex.x, PlayerIndex.y];
         TileData incomingTile = GetTileDataFromPacked(packedData);
 
-        if (incomingTile == null) { CheckFoot(); return; }
+        if (incomingTile == null) { CheckFoot(); return true; }
 
-        // A. 벽이 덮침 -> 플레이어 밀려남
         if (incomingTile.isStop)
         {
             int newX = PlayerIndex.x + (isRow ? dir : 0);
             int newY = PlayerIndex.y + (isRow ? 0 : dir);
             
-            PlayerIndex = new Vector2Int(newX, newY); // 좌표 수정
-            OnPlayerMoved?.Invoke();
+            if (IsInMap(newX, newY))
+            {
+                PlayerIndex = new Vector2Int(newX, newY);
+                OnPlayerMoved?.Invoke();
+                CheckFoot();
+                return true;
+            }
+            else
+            {
+                Debug.Log("맵 밖 회전 취소");
+                return false; 
+            }
         }
-        // B. 상자가 덮침 -> 플레이어가 버티고 상자를 뒤로 밀어냄
         else if (incomingTile.isPush)
         {
-            mapData[PlayerIndex.x, PlayerIndex.y] = 0; // 내 자리는 비움
+            // ★ [수정] 내가 버티고 서 있는 자리는 (상자 모양을 물려받은) 바닥이어야 함
+            mapData[PlayerIndex.x, PlayerIndex.y] = GetFloorWithVariant(packedData);
 
             int boxToSave = packedData;
             int checkX = PlayerIndex.x;
             int checkY = PlayerIndex.y;
             int loopCount = isRow ? width : height;
 
-            // 역주행하며 빈 공간 찾기
             for (int i = 0; i < loopCount; i++)
             {
                 if (isRow) checkX = GetWrappedIndex(checkX - dir, width);
@@ -151,24 +178,27 @@ public class GridSystem : MonoBehaviour
                 int prevData = mapData[checkX, checkY];
                 TileData prevTile = GetTileDataFromPacked(prevData);
 
-                if (prevTile != null && prevTile.isStop) break; // 뒤가 벽이면 상자 파괴
+                if (prevTile != null && prevTile.isStop) break;
                 else if (prevTile == null || (!prevTile.isStop && !prevTile.isPush))
                 {
-                    mapData[checkX, checkY] = boxToSave; // 빈 곳에 안착
+                    mapData[checkX, checkY] = boxToSave;
                     break;
                 }
                 else if (prevTile.isPush)
                 {
-                    mapData[checkX, checkY] = boxToSave; // 교체하고 계속 뒤로 감
+                    mapData[checkX, checkY] = boxToSave;
                     boxToSave = prevData;
                 }
             }
             OnMapChanged?.Invoke();
+            CheckFoot();
+            return true;
         }
+        
         CheckFoot();
+        return true;
     }
 
-    // --- 보조 함수 ---
     void CheckFoot()
     {
         TileData t = GetTileDataFromPacked(mapData[PlayerIndex.x, PlayerIndex.y]);
@@ -182,7 +212,7 @@ public class GridSystem : MonoBehaviour
         for (int x = 0; x < width; x++)
         {
             TileData t = GetTileDataFromPacked(mapData[x, y]);
-            if (t != null && !t.isShift) return false; // 고정축 발견 시 회전 불가
+            if (t != null && !t.isShift) return false;
         }
         return true;
     }
