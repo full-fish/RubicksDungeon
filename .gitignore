@@ -1,0 +1,67 @@
+# 유니티 표준 폴더 (이 폴더들은 절대 커밋하면 안 됩니다)
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+
+# 메모리 덤프 파일
+/[Mm]emoryCaptures/
+
+# 에셋 메타 데이터 임시 파일 (충돌 방지)
+/[Aa]ssets/AssetStoreTools*
+
+# Visual Studio / MonoDevelop / Rider 생성 파일 (유니티가 자동 생성함)
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.slnx
+
+# Unity3D generated meta files
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+
+# Unity3D generated file on crash reports
+sysinfo.txt
+
+# 운영체제 생성 파일 (Mac)
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Visual Studio 관련 폴더
+.vs/
+
+# VS Code 관련 폴더
+.vscode/
+
+# JetBrains Rider 관련 폴더
+.idea/
+
+# 빌드 결과물이 저장되는 폴더들 (프로젝트마다 이름이 다를 수 있음)
+# 아래는 일반적인 이름들입니다. 본인이 쓰는 빌드 폴더명이 다르면 추가하세요.
+/Builds/
+/Build/
+
+# 유니티 패키지 관련 임시 파일
+/[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/*/*.bin*
+/[Aa]ssets/[Ss]treaming[Aa]ssets/aa/*
+
