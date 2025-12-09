@@ -128,31 +128,28 @@ public class RubikManager : MonoBehaviour
 void CreateObj(int id, int var, Vector3 pos, int layer, int x, int y)
     {
         TileData d = GetTileData(id);
-        if (d != null)
-        {
+       if (d != null) {
             VisualVariant v = d.GetVariantByWeight(var);
-            if (v.prefab != null)
-            {
+            if (v.prefab != null) {
                 GameObject go = Instantiate(v.prefab, pos, Quaternion.Euler(v.rotation));
-                if (v.overrideMat != null)
-                {
-                    Renderer r = go.GetComponentInChildren<Renderer>();
-                    if (r) r.material = v.overrideMat;
-                }
+                
                 go.transform.parent = transform;
-
+                
+                // 1. 높이(키) 계산
                 float hm = (layer == 0) ? 1.0f : d.heightMultiplier;
                 float h = tileHeight * hm;
                 go.transform.localScale = new Vector3(tileSizeXZ, h, tileSizeXZ);
+                
+                // ★ [수정] 층별 높이 보정 (1층을 바닥에 딱 붙이기)
+                // 기존: float yOff = tileHeight * layer;  <-- 이게 1층을 공중부양 시킴
+                // 수정: 2층(Sky)만 띄우고, 0층/1층은 바닥(0)에서 시작
+                float yOff = (layer == 2) ? tileHeight * 3.0f : 0f;
 
-                // ★ [핵심 수정] 
-                // Layer 2(공중)만 높게 띄우고, Layer 0(바닥)과 Layer 1(물체)은 바닥(0)에 붙입니다.
-                float yOff = (layer == 2) ? tileHeight * 3.0f : 0;
+                // 2. 최종 위치 잡기
+                // (만약 FBX 모델의 중심점이 '발바닥'에 있다면 "+ h/2f"를 지워야 합니다!)
+                go.transform.position += Vector3.up * yOff;
 
-                // 최종 위치: (오프셋 + 자기 높이의 절반)
-                go.transform.position += Vector3.up * (yOff + h / 2f);
-
-                if (layer == 1) objMap[x, y] = go;
+                if(layer == 1) objMap[x, y] = go; 
             }
         }
     }
@@ -179,8 +176,8 @@ void CreateObj(int id, int var, Vector3 pos, int layer, int x, int y)
         }
         Vector2Int i = gridSystem.PlayerIndex;
         float oX = width/2f - 0.5f, oZ = height/2f - 0.5f;
-        // 플레이어는 1층 높이(tileHeight) 위에 서야 함
-        objPlayer.transform.position = new Vector3(i.x - oX, tileHeight, i.y - oZ);
+        float playerY = 0f;
+        objPlayer.transform.position = new Vector3(i.x - oX, playerY, i.y - oZ);
     }
 
     void RotatePlayer(int dx, int dy) {
