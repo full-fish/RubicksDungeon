@@ -19,7 +19,7 @@ MonoBehaviour:
     rotation: {x: 0, y: 0, z: 0}
     chance: 100
   layerType: 1
-  heightMultiplier: 1
+  heightMultiplier: 0.4
   isStop: 1
   isPush: 0
   isShift: 1

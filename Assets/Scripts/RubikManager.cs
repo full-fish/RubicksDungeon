@@ -128,28 +128,33 @@ public class RubikManager : MonoBehaviour
 void CreateObj(int id, int var, Vector3 pos, int layer, int x, int y)
     {
         TileData d = GetTileData(id);
-       if (d != null) {
+        if (d != null)
+        {
             VisualVariant v = d.GetVariantByWeight(var);
-            if (v.prefab != null) {
+            if (v.prefab != null)
+            {
                 GameObject go = Instantiate(v.prefab, pos, Quaternion.Euler(v.rotation));
                 
+                Renderer[] renderers = go.GetComponentsInChildren<Renderer>();
+                foreach (Renderer r in renderers)
+                {
+                    if (v.overrideMat != null) r.material = v.overrideMat;
+                }
+
                 go.transform.parent = transform;
                 
-                // 1. 높이(키) 계산
+                // 높이 설정
                 float hm = (layer == 0) ? 1.0f : d.heightMultiplier;
                 float h = tileHeight * hm;
-                go.transform.localScale = new Vector3(tileSizeXZ, h, tileSizeXZ);
+                float xzScale = (layer == 0) ? 1.0f : tileSizeXZ;
                 
-                // ★ [수정] 층별 높이 보정 (1층을 바닥에 딱 붙이기)
-                // 기존: float yOff = tileHeight * layer;  <-- 이게 1층을 공중부양 시킴
-                // 수정: 2층(Sky)만 띄우고, 0층/1층은 바닥(0)에서 시작
+                go.transform.localScale = new Vector3(xzScale, h, xzScale);
+                
+                // 위치 설정 (발바닥 피벗 기준)
                 float yOff = (layer == 2) ? tileHeight * 3.0f : 0f;
-
-                // 2. 최종 위치 잡기
-                // (만약 FBX 모델의 중심점이 '발바닥'에 있다면 "+ h/2f"를 지워야 합니다!)
                 go.transform.position += Vector3.up * yOff;
 
-                if(layer == 1) objMap[x, y] = go; 
+                if (layer == 1) objMap[x, y] = go;
             }
         }
     }

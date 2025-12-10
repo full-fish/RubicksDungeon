@@ -144,9 +144,9 @@ public class GridSystem : MonoBehaviour
         int packedData = maps[PlayerIndex.x, PlayerIndex.y, layer];
         TileData tile = GetTileDataFromPacked(packedData);
 
-        if (tile == null) return true; // 빈 공간이면 통과
+        if (tile == null) return true;
 
-        if (tile.isStop) // 벽 -> 플레이어 밀기
+        if (tile.isStop) // A. 벽이 덮침 -> 플레이어 밀기 (기존 로직 유지)
         {
             int newX = PlayerIndex.x + (isRow ? dir : 0);
             int newY = PlayerIndex.y + (isRow ? 0 : dir);
@@ -159,37 +159,78 @@ public class GridSystem : MonoBehaviour
             }
             else return false;
         }
-        else if (tile.isPush) // 상자 -> 역주행
+        else if (tile.isPush) // B. 상자가 덮침 -> 벽이 미는지 확인 (Chain Push 로직)
         {
-            maps[PlayerIndex.x, PlayerIndex.y, layer] = 0; 
-            int itemToSave = packedData;
-            
-            int checkX = PlayerIndex.x;
-            int checkY = PlayerIndex.y;
+            // 1. 역추적: 상자 줄의 끝에 무엇이 있는지 확인
+            bool isPushedByWall = false;
+            int scanX = PlayerIndex.x;
+            int scanY = PlayerIndex.y;
             int loopCount = isRow ? width : height;
 
             for (int i = 0; i < loopCount; i++)
             {
-                if (isRow) checkX = GetWrappedIndex(checkX - dir, width);
-                else       checkY = GetWrappedIndex(checkY - dir, height);
+                // Layer가 이동해 온 반대 방향(-dir)으로 검사
+                if (isRow) scanX = GetWrappedIndex(scanX - dir, width);
+                else       scanY = GetWrappedIndex(scanY - dir, height);
 
-                TileData dest = GetTileDataFromPacked(maps[checkX, checkY, layer]);
+                TileData backTile = GetTileDataFromPacked(maps[scanX, scanY, layer]);
 
-                if (dest != null && dest.isStop) break;
-                else if (dest == null)
+                if (backTile != null && backTile.isStop)
                 {
-                    maps[checkX, checkY, layer] = itemToSave;
+                    isPushedByWall = true; // ★ 뒤에 벽(Wall) 발견! -> 플레이어 밀어야 함
                     break;
                 }
-                else if (dest.isPush)
+                else if (backTile == null || (!backTile.isStop && !backTile.isPush))
                 {
-                    int temp = maps[checkX, checkY, layer];
-                    maps[checkX, checkY, layer] = itemToSave;
-                    itemToSave = temp;
+                    isPushedByWall = false; // 뒤에 빈 공간이나 장애물 아닌 것 발견! -> 상자 역주행
+                    break;
+                }
+                // else: 또 다른 상자이므로 계속 뒤로 스캔 (Box Chain)
+            }
+            
+            // 2. 판정 결과에 따른 행동
+            if (isPushedByWall)
+            {
+                // Wall -> Box -> Player 상황: 플레이어가 밀려나야 함.
+                int newX = PlayerIndex.x + (isRow ? dir : 0);
+                int newY = PlayerIndex.y + (isRow ? 0 : dir);
+                
+                if (IsInMap(newX, newY))
+                {
+                    PlayerIndex = new Vector2Int(newX, newY);
+                    OnPlayerMoved?.Invoke();
+                    return true; // 성공! (모두 밀림)
+                }
+                else 
+                {
+                    return false; // 맵 밖이라 밀릴 수 없음 -> 전체 맵 회전 취소
                 }
             }
-            OnMapChanged?.Invoke();
-            return true;
+            else 
+            {
+                // Box drifts in 상황: 플레이어가 버티고 상자는 뒤로 밀려남 (Domino Logic 유지)
+                
+                maps[PlayerIndex.x, PlayerIndex.y, layer] = 0; 
+                int itemToSave = packedData;
+                
+                // 상자를 역주행 시켜 빈 공간으로 보냄
+                scanX = PlayerIndex.x;
+                scanY = PlayerIndex.y;
+
+                for (int i = 0; i < loopCount; i++)
+                {
+                    if (isRow) scanX = GetWrappedIndex(scanX - dir, width);
+                    else       scanY = GetWrappedIndex(scanY - dir, height);
+
+                    TileData dest = GetTileDataFromPacked(maps[scanX, scanY, layer]);
+
+                    if (dest != null && dest.isStop) break;
+                    else if (dest == null) { maps[scanX, scanY, layer] = itemToSave; break; } 
+                    else if (dest.isPush) { int tmp = maps[scanX, scanY, layer]; maps[scanX, scanY, layer] = itemToSave; itemToSave = tmp; }
+                }
+                OnMapChanged?.Invoke();
+                return true;
+            }
         }
         return true;
     }

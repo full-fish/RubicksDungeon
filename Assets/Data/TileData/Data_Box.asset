@@ -15,7 +15,7 @@ MonoBehaviour:
   tileID: 300
   variants:
   - prefab: {fileID: 919132149155446097, guid: 9d5baad3f5d4f884a98f67cf9a2c28a5, type: 3}
-    overrideMat: {fileID: 0}
+    overrideMat: {fileID: 2100000, guid: 8acfae20f9a13874ab6a389246361f4a, type: 2}
     rotation: {x: 0, y: 0, z: 0}
     chance: 100
   layerType: 1
