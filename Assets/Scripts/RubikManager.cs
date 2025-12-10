@@ -2,22 +2,51 @@ using UnityEngine;
 using System.Collections;
 using System; 
 using System.Collections.Generic;
+using Newtonsoft.Json; 
+
+// --- [변경] Stage 용어로 클래스 이름 변경 ---
+[System.Serializable]
+public class StageDataRoot
+{
+    public StageProps properties;
+    public StageLayers layers;
+}
+
+[System.Serializable]
+public class StageProps
+{
+    public string stageName; // JSON의 "stageName"과 매칭 (JSON 키도 바꿔주세요!)
+    public int maxShifts;
+    public int width;
+    public int height;
+}
+
+[System.Serializable]
+public class StageLayers
+{
+    public int[][] tile;   
+    public int[][] ground; 
+    public int[][] sky;    
+}
+// -------------------------------------------
 
 public class RubikManager : MonoBehaviour
 {
     public GridSystem gridSystem;
     public UIManager uiManager;
     public TileData[] tilePalette;
-    public TextAsset[] levelFiles; 
-    public int currentLevelIndex = 0; 
+    
+    // ★ [변경] 변수명 levelFiles -> stageFiles
+    public TextAsset[] stageFiles; 
+    
+    // ★ [변경] 변수명 currentLevelIndex -> currentStageIndex
+    public int currentStageIndex = 0; 
     
     public GameObject prefabPlayer;
     [Range(0.5f, 1.0f)] public float tileSizeXZ = 0.8f;
     [Range(0.1f, 3.0f)] public float tileHeight = 0.2f;
 
-    // ★ [추가] 횟수 제한 설정
     [Header("게임 규칙")]
-    [Tooltip("이 스테이지에서 맵을 돌릴 수 있는 최대 횟수")]
     public int maxShiftCount = 10; 
     private int _currentShifts;
 
@@ -45,17 +74,19 @@ public class RubikManager : MonoBehaviour
     void InitializeGame() {
         StopAllCoroutines(); isGameEnding = false;
         
-        // ★ [추가] 횟수 초기화
-        _currentShifts = maxShiftCount;
-        Debug.Log($"게임 시작! 남은 회전 횟수: {_currentShifts}");
-
         if (uiManager != null) uiManager.HideAll();
         ClearMapVisuals();
-        LoadMap(); 
+        
+        // ★ [변경] 함수명 LoadMap -> LoadStage
+        LoadStage(); 
+        
+        // 횟수 초기화 (LoadStage 이후에 해야 JSON 값이 적용됨)
+        _currentShifts = maxShiftCount;
+        Debug.Log($"스테이지 시작! 남은 회전 횟수: {_currentShifts}");
+
         UpdateView(); UpdatePlayerVis(); AutoAdjustCamera();
     }
 
-    // --- [수정] 횟수 제한 적용된 입력 처리 ---
     public void TryMovePlayer(int dx, int dy) { 
         if(!isGameEnding) { RotatePlayer(dx, dy); gridSystem.TryMovePlayer(dx, dy); } 
     }
@@ -64,77 +95,86 @@ public class RubikManager : MonoBehaviour
     { 
         if (!isGameEnding && _currentShifts > 0) 
         {
-            // GridSystem이 성공(true)을 반환하면 횟수 차감
-            if (gridSystem.TryPushRow(dir)) 
-            {
-                UseShiftChance();
-            }
+            if (gridSystem.TryPushRow(dir)) UseShiftChance();
         } 
-        else if (_currentShifts <= 0)
-        {
-            Debug.Log("회전 횟수를 모두 소진했습니다!");
-        }
+        else if (_currentShifts <= 0) Debug.Log("회전 횟수를 모두 소진했습니다!");
     }
 
     public void TryPushCol(int dir) 
     { 
         if (!isGameEnding && _currentShifts > 0) 
         { 
-            if (gridSystem.TryPushCol(dir)) 
-            {
-                UseShiftChance();
-            }
+            if (gridSystem.TryPushCol(dir)) UseShiftChance();
         }
-        else if (_currentShifts <= 0)
-        {
-            Debug.Log("회전 횟수를 모두 소진했습니다!");
-        }
+        else if (_currentShifts <= 0) Debug.Log("회전 횟수를 모두 소진했습니다!");
     }
 
-    // 횟수 사용 처리 함수
     void UseShiftChance()
     {
         _currentShifts--;
         Debug.Log($"회전 성공! 남은 횟수: {_currentShifts}");
-        // 나중에 UI 매니저에 연동하면 됩니다.
-        // if(uiManager != null) uiManager.UpdateShiftCount(_currentShifts);
     }
 
-    // ---------------------------------------------------------
-
-    void LoadMap()
+    // ★ [변경] 함수명 LoadMap -> LoadStage
+    void LoadStage()
     {
-        if (levelFiles == null || levelFiles.Length == 0) return;
-        string text = levelFiles[currentLevelIndex].text.Replace("\r", "");
+        // ★ 변수명 변경 stageFiles
+        if (stageFiles == null || stageFiles.Length == 0) return;
         
-        string[] layerBlocks = text.Split(new string[] { "---" }, StringSplitOptions.RemoveEmptyEntries);
-        string[] firstLayerLines = layerBlocks[0].Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        height = firstLayerLines.Length;
-        width = firstLayerLines[0].Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+        // ★ 변수명 변경 currentStageIndex
+        string jsonText = stageFiles[currentStageIndex].text;
+        
+        StageDataRoot data = null;
+        try 
+        {
+            data = JsonConvert.DeserializeObject<StageDataRoot>(jsonText);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError("JSON 파싱 실패: " + e.Message);
+            return;
+        }
+
+        if (data == null || data.properties == null) return;
+
+        width = data.properties.width;
+        height = data.properties.height;
+        maxShiftCount = data.properties.maxShifts;
+        
+        Debug.Log($"로드된 스테이지: {data.properties.stageName}");
 
         int[,,] maps = new int[width, height, 3];
         Vector2Int startPos = new Vector2Int(width/2, height/2);
         objMap = new GameObject[width, height];
 
-        for (int l = 0; l < 3; l++) {
-            if (l >= layerBlocks.Length) break;
-            string[] lines = layerBlocks[l].Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-            for (int y = 0; y < height; y++) {
-                string[] nums = lines[height - 1 - y].Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                for (int x = 0; x < width; x++) {
-                    if(x < nums.Length) {
-                        int id = int.Parse(nums[x]);
-                        if (id == -1) id = 0;
-                        if (id == 0 && nums[x] == "0") {
-                            if (l == 1) startPos = new Vector2Int(x, y);
-                            id = 0;
-                        }
-                        maps[x, y, l] = id;
-                    }
+        FillLayer(maps, data.layers.tile, 0);   
+        FillLayer(maps, data.layers.ground, 1); 
+        FillLayer(maps, data.layers.sky, 2);    
+
+        gridSystem.Initialize(width, height, maps, tilePalette, startPos);
+    }
+
+    void FillLayer(int[,,] targetMap, int[][] sourceLayer, int layerIndex)
+    {
+        if (sourceLayer == null) return;
+
+        for (int row = 0; row < sourceLayer.Length; row++)
+        {
+            if (sourceLayer[row] == null) continue;
+            
+            for (int col = 0; col < sourceLayer[row].Length; col++)
+            {
+                int x = col;
+                int y = height - 1 - row; 
+
+                if (x < width && y >= 0)
+                {
+                    int id = sourceLayer[row][col];
+                    if (id == -1) id = 0; 
+                    targetMap[x, y, layerIndex] = id;
                 }
             }
         }
-        gridSystem.Initialize(width, height, maps, tilePalette, startPos);
     }
 
     void UpdateView()
@@ -162,7 +202,6 @@ public class RubikManager : MonoBehaviour
             if (v.prefab != null) {
                 GameObject go = Instantiate(v.prefab, pos, Quaternion.Euler(v.rotation));
                 
-                // 그림자 설정이 필요 없다면 아래 렌더러 부분은 지워도 됩니다.
                 Renderer[] renderers = go.GetComponentsInChildren<Renderer>();
                 foreach (Renderer r in renderers) if (v.overrideMat != null) r.material = v.overrideMat;
 
@@ -222,14 +261,23 @@ public class RubikManager : MonoBehaviour
         }
     }
     IEnumerator ProcessFail() { isGameEnding=true; uiManager?.ShowFail(); yield return new WaitForSeconds(1.5f); InitializeGame(); }
-    IEnumerator ProcessClear() { isGameEnding=true; uiManager?.ShowClear(); yield return new WaitForSeconds(1.5f); currentLevelIndex++; InitializeGame(); }
+    
+    // ★ [변경] 다음 스테이지로 넘어갈 때 인덱스 변수명 변경
+    IEnumerator ProcessClear() { 
+        isGameEnding=true; 
+        uiManager?.ShowClear(); 
+        yield return new WaitForSeconds(1.5f); 
+        currentStageIndex++; // currentLevelIndex -> currentStageIndex
+        InitializeGame(); 
+    }
     
     void AutoAdjustCamera() { 
         Camera cam = Camera.main;
         if (cam == null) return;
+        
+        // ★ 요청하신 코드 삭제하지 않고 유지!
         cam.transform.position = -cam.transform.forward * 50f;
         
-        // 맵 크기 비례 자동 조절
         float mapW = width * tileSizeXZ;
         float mapH = height * tileSizeXZ;
         float padding = 2.0f; 
