@@ -118,22 +118,13 @@ public class RubikManager : MonoBehaviour
     // ★ [변경] 함수명 LoadMap -> LoadStage
     void LoadStage()
     {
-        // ★ 변수명 변경 stageFiles
         if (stageFiles == null || stageFiles.Length == 0) return;
         
-        // ★ 변수명 변경 currentStageIndex
         string jsonText = stageFiles[currentStageIndex].text;
         
         StageDataRoot data = null;
-        try 
-        {
-            data = JsonConvert.DeserializeObject<StageDataRoot>(jsonText);
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogError("JSON 파싱 실패: " + e.Message);
-            return;
-        }
+        try { data = JsonConvert.DeserializeObject<StageDataRoot>(jsonText); }
+        catch (System.Exception e) { Debug.LogError("JSON 파싱 실패: " + e.Message); return; }
 
         if (data == null || data.properties == null) return;
 
@@ -144,17 +135,21 @@ public class RubikManager : MonoBehaviour
         Debug.Log($"로드된 스테이지: {data.properties.stageName}");
 
         int[,,] maps = new int[width, height, 3];
-        Vector2Int startPos = new Vector2Int(width/2, height/2);
         objMap = new GameObject[width, height];
+        
+        // 기본 시작 위치는 중앙이지만, FillLayer에서 진짜 위치를 찾으면 덮어씌워짐
+        Vector2Int startPos = new Vector2Int(width/2, height/2);
 
-        FillLayer(maps, data.layers.tile, 0);   
-        FillLayer(maps, data.layers.ground, 1); 
-        FillLayer(maps, data.layers.sky, 2);    
+        // ★ FillLayer에 startPos를 ref로 넘겨서, 플레이어(0) 위치를 찾게 함
+        FillLayer(maps, data.layers.tile, 0, ref startPos);   
+        FillLayer(maps, data.layers.ground, 1, ref startPos); // 여기서 플레이어 위치 찾음!
+        FillLayer(maps, data.layers.sky, 2, ref startPos);    
 
         gridSystem.Initialize(width, height, maps, tilePalette, startPos);
     }
 
-    void FillLayer(int[,,] targetMap, int[][] sourceLayer, int layerIndex)
+    // ★ [수정] 플레이어 위치(0)를 찾아서 startPos를 업데이트하는 로직 추가
+    void FillLayer(int[,,] targetMap, int[][] sourceLayer, int layerIndex, ref Vector2Int startPos)
     {
         if (sourceLayer == null) return;
 
@@ -169,9 +164,17 @@ public class RubikManager : MonoBehaviour
 
                 if (x < width && y >= 0)
                 {
-                    int id = sourceLayer[row][col];
-                    if (id == -1) id = 0; 
+                    int rawId = sourceLayer[row][col]; // 원본 ID 확인
+                    int id = rawId;
+                    if (id == -1) id = 0; // -1은 0으로 변환
+
                     targetMap[x, y, layerIndex] = id;
+
+                    // ★ [핵심] Ground 층(1)에서 원본 값이 '0'인 곳이 플레이어 시작 위치!
+                    if (layerIndex == 1 && rawId == 0)
+                    {
+                        startPos = new Vector2Int(x, y);
+                    }
                 }
             }
         }
