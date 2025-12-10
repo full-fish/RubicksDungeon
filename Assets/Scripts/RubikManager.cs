@@ -99,6 +99,8 @@ public class RubikManager : MonoBehaviour
         LoadStage(); 
         
         _currentShifts = maxShiftCount;
+        if (uiManager != null) 
+            uiManager.UpdateShiftText(_currentShifts, maxShiftCount);
         Debug.Log($"스테이지 시작! 남은 회전 횟수: {_currentShifts}");
 
         UpdateView(); UpdatePlayerVis(); AutoAdjustCamera();
@@ -127,7 +129,8 @@ public void OnClickUndo()
 
         GameState lastState = undoStack.Pop();
         _currentShifts = lastState.remainingShifts;
-        
+        if (uiManager != null) 
+            uiManager.UpdateShiftText(_currentShifts, maxShiftCount);
         // 맵 & 위치 복구
         gridSystem.RestoreMapData(lastState.mapData, lastState.playerPos);
 
@@ -218,6 +221,8 @@ public void TryMovePlayer(int dx, int dy) {
     void UseShiftChance()
     {
         _currentShifts--;
+        if (uiManager != null) 
+            uiManager.UpdateShiftText(_currentShifts, maxShiftCount);
         Debug.Log($"회전 성공! 남은 횟수: {_currentShifts}");
     }
 
