@@ -76,7 +76,10 @@ public class RubikManager : MonoBehaviour
         if (gridSystem == null) gridSystem = GetComponent<GridSystem>();
         gridSystem.OnMapChanged += UpdateView;
         gridSystem.OnPlayerMoved += UpdatePlayerVis;
-        gridSystem.OnTrapTriggered += () => StartCoroutine(ProcessFail());
+        
+        // ★ [수정] 코루틴(StartCoroutine)이 아니라 그냥 함수 호출로 변경
+        gridSystem.OnTrapTriggered += ProcessFail; 
+        
         gridSystem.OnGoalTriggered += () => StartCoroutine(ProcessClear());
         InitializeGame();
     }
@@ -119,30 +122,41 @@ void SaveState()
     }
 
     // ★ [Undo] 뒤로가기 버튼 기능
-public void OnClickUndo()
+    public void OnClickUndo()
     {
-        if (isGameEnding || undoStack.Count == 0) 
+        // ★ [수정] isGameEnding 체크 삭제! (실패 상태에서도 Undo 가능해야 함)
+        if (undoStack.Count == 0) 
         {
             Debug.Log("더 이상 뒤로 갈 수 없습니다.");
             return;
         }
 
+        // 1. 상태 복구
         GameState lastState = undoStack.Pop();
         _currentShifts = lastState.remainingShifts;
-        if (uiManager != null) 
-            uiManager.UpdateShiftText(_currentShifts, maxShiftCount);
-        // 맵 & 위치 복구
         gridSystem.RestoreMapData(lastState.mapData, lastState.playerPos);
 
-        // ★ 회전 복구 (캐릭터 오브젝트가 있을 때만)
+        // 2. 캐릭터 회전 복구
         if (objPlayer != null) 
         {
             objPlayer.transform.rotation = lastState.playerRot;
         }
 
+        // ★ [추가] 죽었던 상태(isGameEnding)를 다시 '살아있음(false)'으로 변경
+        isGameEnding = false;
+
+        // ★ [추가] 화면에 떠있는 FAIL 텍스트 치우기
+        if (uiManager != null) uiManager.HideAll();
+
+        // 3. 화면 갱신
         UpdateView(); 
-        UpdatePlayerVis(); // 위치 갱신
-        Debug.Log($"실행 취소! 남은 회전 횟수: {_currentShifts}");
+        UpdatePlayerVis(); 
+        
+        // 4. UI 갱신
+        if (uiManager != null) 
+            uiManager.UpdateShiftText(_currentShifts, maxShiftCount);
+
+        Debug.Log($"실행 취소! 되살아났습니다.");
     }
 
     // ★ [Reset] 리셋 버튼 기능
@@ -364,7 +378,14 @@ public void TryMovePlayer(int dx, int dy) {
             }
         }
     }
-    IEnumerator ProcessFail() { isGameEnding=true; uiManager?.ShowFail(); yield return new WaitForSeconds(1.5f); InitializeGame(); }
+    // ★ [수정] IEnumerator -> void 변경
+    // 자동 초기화 로직을 삭제하여 플레이어가 버튼을 누를 때까지 대기
+    void ProcessFail() 
+    { 
+        isGameEnding = true;   // 이동 입력 막기
+        uiManager?.ShowFail(); // 실패 텍스트 띄우기
+        Debug.Log("실패! 리셋하거나 뒤로가기를 누르세요.");
+    }
     
     IEnumerator ProcessClear() { 
         isGameEnding=true; 
