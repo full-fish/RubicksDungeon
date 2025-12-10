@@ -28,7 +28,6 @@ public class StageLayers
     public int[][] ground; 
     public int[][] sky;    
 }
-// -------------------------------------------
 
 public class RubikManager : MonoBehaviour
 {
@@ -294,5 +293,11 @@ public class RubikManager : MonoBehaviour
             float distance = targetSize / Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
             cam.transform.position = Vector3.zero - (cam.transform.forward * distance);
         }
+    }
+    
+    public void OnClickReset()
+    {
+        Debug.Log("스테이지를 다시 시작합니다.");
+        InitializeGame(); // 기존에 만들어둔 게임 초기화 함수 재실행
     }
 }
