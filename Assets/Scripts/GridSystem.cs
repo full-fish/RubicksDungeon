@@ -60,40 +60,50 @@ public class GridSystem : MonoBehaviour
     }
 
     // --- [1] 플레이어 이동 ---
-    public void TryMovePlayer(int dx, int dy)
+    // --- [1] 플레이어 이동 (void -> bool 변경) ---
+    public bool TryMovePlayer(int dx, int dy)
     {
         int nextX = PlayerIndex.x + dx;
         int nextY = PlayerIndex.y + dy;
-        if (!IsInMap(nextX, nextY)) return;
+        
+        // 1. 맵 밖으로 나가면 실패
+        if (!IsInMap(nextX, nextY)) return false;
 
+        // 2. 모든 층의 벽(Stop) 확인 -> 막히면 실패
         for (int l = 0; l < 3; l++) {
             TileData t = GetTileDataFromPacked(maps[nextX, nextY, l]);
-            if (t != null && t.isStop) return;
+            if (t != null && t.isStop) return false;
         }
 
+        // 3. 상자 밀기 (Layer 1에서만 발생)
         int layer = 1; 
         TileData obj = GetTileDataFromPacked(maps[nextX, nextY, layer]);
 
         if (obj != null && obj.isPush) {
             int pushX = nextX + dx;
             int pushY = nextY + dy;
-            if (!IsInMap(pushX, pushY)) return;
+            
+            // 미는 곳이 맵 밖이면 실패
+            if (!IsInMap(pushX, pushY)) return false;
 
             TileData destObj = GetTileDataFromPacked(maps[pushX, pushY, layer]);
             TileData destFloor = GetTileDataFromPacked(maps[pushX, pushY, 0]);
 
+            // 밀 공간이 비어있고 & 바닥이 막힌 곳이 아니어야 함
             bool canPush = (destObj == null) && (destFloor == null || !destFloor.isStop);
 
             if (canPush) {
                 maps[pushX, pushY, layer] = maps[nextX, nextY, layer]; 
                 maps[nextX, nextY, layer] = 0; 
                 OnMapChanged?.Invoke();
-            } else return;
+            } else return false; // 상자가 막혀서 못 밀면 실패
         }
 
+        // 4. 이동 성공
         PlayerIndex = new Vector2Int(nextX, nextY);
         OnPlayerMoved?.Invoke();
         CheckFoot();
+        return true; // 성공 반환
     }
 
     // --- [2] 맵 회전 (수정됨: bool 반환) ---
@@ -232,4 +242,20 @@ public class GridSystem : MonoBehaviour
     }
     bool IsInMap(int x, int y) => x >= 0 && x < width && y >= 0 && y < height;
     int GetWrappedIndex(int index, int max) => (index % max + max) % max;
-}
+
+    public int[,,] GetMapSnapshot()
+    {
+        return (int[,,])maps.Clone(); // 배열 복제
+    }
+
+    // ★ [추가] 저장된 맵 데이터로 상태 복구
+    public void RestoreMapData(int[,,] savedMap, Vector2Int savedPlayerIndex)
+    {
+        maps = savedMap;
+        PlayerIndex = savedPlayerIndex;
+        // 맵이 바뀌었으니 이벤트 호출 (시각적 갱신을 위해)
+        OnMapChanged?.Invoke(); 
+        OnPlayerMoved?.Invoke();
+    }
+    }
+

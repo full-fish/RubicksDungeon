@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using Newtonsoft.Json; 
 
-// --- [변경] Stage 용어로 클래스 이름 변경 ---
+// --- JSON 데이터 구조 ---
 [System.Serializable]
 public class StageDataRoot
 {
@@ -15,7 +15,7 @@ public class StageDataRoot
 [System.Serializable]
 public class StageProps
 {
-    public string stageName; // JSON의 "stageName"과 매칭 (JSON 키도 바꿔주세요!)
+    public string stageName;
     public int maxShifts;
     public int width;
     public int height;
@@ -29,16 +29,30 @@ public class StageLayers
     public int[][] sky;    
 }
 
+// --- 뒤로가기(Undo) 저장용 클래스 ---
+public class GameState
+{
+    public int[,,] mapData;
+    public Vector2Int playerPos;
+    public int remainingShifts;
+    public Quaternion playerRot;
+public GameState(int[,,] map, Vector2Int pos, int shifts, Quaternion rot) 
+    {
+        this.mapData = map;
+        this.playerPos = pos;
+        this.remainingShifts = shifts;
+        this.playerRot = rot; // 회전값 초기화
+    }
+}
+// ------------------------
+
 public class RubikManager : MonoBehaviour
 {
     public GridSystem gridSystem;
     public UIManager uiManager;
     public TileData[] tilePalette;
     
-    // ★ [변경] 변수명 levelFiles -> stageFiles
-    public TextAsset[] stageFiles; 
-    
-    // ★ [변경] 변수명 currentLevelIndex -> currentStageIndex
+    public TextAsset[] stageFiles; // Stage Files
     public int currentStageIndex = 0; 
     
     public GameObject prefabPlayer;
@@ -48,6 +62,9 @@ public class RubikManager : MonoBehaviour
     [Header("게임 규칙")]
     public int maxShiftCount = 10; 
     private int _currentShifts;
+
+    // 뒤로가기 스택
+    private Stack<GameState> undoStack = new Stack<GameState>();
 
     private GameObject[,] objMap;
     private GameObject objPlayer;
@@ -73,39 +90,129 @@ public class RubikManager : MonoBehaviour
     void InitializeGame() {
         StopAllCoroutines(); isGameEnding = false;
         
+        // 스택 초기화
+        undoStack.Clear();
+
         if (uiManager != null) uiManager.HideAll();
         ClearMapVisuals();
         
-        // ★ [변경] 함수명 LoadMap -> LoadStage
         LoadStage(); 
         
-        // 횟수 초기화 (LoadStage 이후에 해야 JSON 값이 적용됨)
         _currentShifts = maxShiftCount;
         Debug.Log($"스테이지 시작! 남은 회전 횟수: {_currentShifts}");
 
         UpdateView(); UpdatePlayerVis(); AutoAdjustCamera();
     }
 
-    public void TryMovePlayer(int dx, int dy) { 
-        if(!isGameEnding) { RotatePlayer(dx, dy); gridSystem.TryMovePlayer(dx, dy); } 
+    // ★ [Undo] 상태 저장 함수
+void SaveState()
+    {
+        int[,,] currentMap = gridSystem.GetMapSnapshot();
+        Vector2Int currentPos = gridSystem.PlayerIndex;
+        
+        // 현재 캐릭터의 회전값 가져오기 (없으면 기본값)
+        Quaternion currentRot = objPlayer != null ? objPlayer.transform.rotation : Quaternion.identity;
+
+        undoStack.Push(new GameState(currentMap, currentPos, _currentShifts, currentRot));
+    }
+
+    // ★ [Undo] 뒤로가기 버튼 기능
+public void OnClickUndo()
+    {
+        if (isGameEnding || undoStack.Count == 0) 
+        {
+            Debug.Log("더 이상 뒤로 갈 수 없습니다.");
+            return;
+        }
+
+        GameState lastState = undoStack.Pop();
+        _currentShifts = lastState.remainingShifts;
+        
+        // 맵 & 위치 복구
+        gridSystem.RestoreMapData(lastState.mapData, lastState.playerPos);
+
+        // ★ 회전 복구 (캐릭터 오브젝트가 있을 때만)
+        if (objPlayer != null) 
+        {
+            objPlayer.transform.rotation = lastState.playerRot;
+        }
+
+        UpdateView(); 
+        UpdatePlayerVis(); // 위치 갱신
+        Debug.Log($"실행 취소! 남은 회전 횟수: {_currentShifts}");
+    }
+
+    // ★ [Reset] 리셋 버튼 기능
+    public void OnClickReset()
+    {
+        Debug.Log("다시 시작");
+        InitializeGame();
+    }
+
+    // --- 입력 처리 (중복 없이 하나만 있어야 함!) ---
+public void TryMovePlayer(int dx, int dy) { 
+        if(!isGameEnding) { 
+            // 1. 입력 전 상태 저장
+            SaveState(); 
+            
+            // 2. 회전하기 전 각도 기억
+            Quaternion beforeRot = objPlayer != null ? objPlayer.transform.rotation : Quaternion.identity;
+
+            // 3. 캐릭터 회전 적용
+            RotatePlayer(dx, dy); 
+            
+            // 4. 회전한 후 각도 기억
+            Quaternion afterRot = objPlayer != null ? objPlayer.transform.rotation : Quaternion.identity;
+
+            // 5. 이동 시도
+            bool isMoved = gridSystem.TryMovePlayer(dx, dy);
+
+            if (!isMoved) 
+            {
+                // ★ [핵심 로직] 이동은 실패(벽)했지만, 
+                // 바라보는 방향이 바뀌었다면(before != after) -> "유의미한 행동"으로 보고 저장 유지
+                // 방향도 그대로라면 -> "아무것도 안 한 것"이므로 저장 취소(Pop)
+                if (beforeRot == afterRot)
+                {
+                    undoStack.Pop(); 
+                }
+            }
+            // 이동 성공(isMoved == true)했다면 당연히 저장 유지
+        } 
     }
 
     public void TryPushRow(int dir) 
     { 
         if (!isGameEnding && _currentShifts > 0) 
         {
-            if (gridSystem.TryPushRow(dir)) UseShiftChance();
+            SaveState(); // 일단 저장
+            if (gridSystem.TryPushRow(dir)) 
+            {
+                UseShiftChance();
+            }
+            else
+            {
+                undoStack.Pop(); // 실패하면 저장 취소
+            }
         } 
-        else if (_currentShifts <= 0) Debug.Log("회전 횟수를 모두 소진했습니다!");
+        else if (_currentShifts <= 0) Debug.Log("횟수 부족");
     }
 
     public void TryPushCol(int dir) 
     { 
         if (!isGameEnding && _currentShifts > 0) 
         { 
-            if (gridSystem.TryPushCol(dir)) UseShiftChance();
+            SaveState(); // 일단 저장
+            if (gridSystem.TryPushCol(dir)) 
+            {
+                UseShiftChance();
+            }
+            else
+            {
+                undoStack.Pop(); // 실패하면 저장 취소
+            }
         }
-        else if (_currentShifts <= 0) Debug.Log("회전 횟수를 모두 소진했습니다!");
+        else if (_currentShifts <= 0) Debug.Log("횟수 부족");
     }
 
     void UseShiftChance()
@@ -114,7 +221,7 @@ public class RubikManager : MonoBehaviour
         Debug.Log($"회전 성공! 남은 횟수: {_currentShifts}");
     }
 
-    // ★ [변경] 함수명 LoadMap -> LoadStage
+    // --- 맵 로드 및 렌더링 ---
     void LoadStage()
     {
         if (stageFiles == null || stageFiles.Length == 0) return;
@@ -134,20 +241,16 @@ public class RubikManager : MonoBehaviour
         Debug.Log($"로드된 스테이지: {data.properties.stageName}");
 
         int[,,] maps = new int[width, height, 3];
-        objMap = new GameObject[width, height];
-        
-        // 기본 시작 위치는 중앙이지만, FillLayer에서 진짜 위치를 찾으면 덮어씌워짐
         Vector2Int startPos = new Vector2Int(width/2, height/2);
+        objMap = new GameObject[width, height];
 
-        // ★ FillLayer에 startPos를 ref로 넘겨서, 플레이어(0) 위치를 찾게 함
         FillLayer(maps, data.layers.tile, 0, ref startPos);   
-        FillLayer(maps, data.layers.ground, 1, ref startPos); // 여기서 플레이어 위치 찾음!
+        FillLayer(maps, data.layers.ground, 1, ref startPos); 
         FillLayer(maps, data.layers.sky, 2, ref startPos);    
 
         gridSystem.Initialize(width, height, maps, tilePalette, startPos);
     }
 
-    // ★ [수정] 플레이어 위치(0)를 찾아서 startPos를 업데이트하는 로직 추가
     void FillLayer(int[,,] targetMap, int[][] sourceLayer, int layerIndex, ref Vector2Int startPos)
     {
         if (sourceLayer == null) return;
@@ -155,7 +258,6 @@ public class RubikManager : MonoBehaviour
         for (int row = 0; row < sourceLayer.Length; row++)
         {
             if (sourceLayer[row] == null) continue;
-            
             for (int col = 0; col < sourceLayer[row].Length; col++)
             {
                 int x = col;
@@ -163,17 +265,12 @@ public class RubikManager : MonoBehaviour
 
                 if (x < width && y >= 0)
                 {
-                    int rawId = sourceLayer[row][col]; // 원본 ID 확인
+                    int rawId = sourceLayer[row][col];
                     int id = rawId;
-                    if (id == -1) id = 0; // -1은 0으로 변환
-
+                    if (id == -1) id = 0; 
                     targetMap[x, y, layerIndex] = id;
 
-                    // ★ [핵심] Ground 층(1)에서 원본 값이 '0'인 곳이 플레이어 시작 위치!
-                    if (layerIndex == 1 && rawId == 0)
-                    {
-                        startPos = new Vector2Int(x, y);
-                    }
+                    if (layerIndex == 1 && rawId == 0) startPos = new Vector2Int(x, y);
                 }
             }
         }
@@ -264,12 +361,11 @@ public class RubikManager : MonoBehaviour
     }
     IEnumerator ProcessFail() { isGameEnding=true; uiManager?.ShowFail(); yield return new WaitForSeconds(1.5f); InitializeGame(); }
     
-    // ★ [변경] 다음 스테이지로 넘어갈 때 인덱스 변수명 변경
     IEnumerator ProcessClear() { 
         isGameEnding=true; 
         uiManager?.ShowClear(); 
         yield return new WaitForSeconds(1.5f); 
-        currentStageIndex++; // currentLevelIndex -> currentStageIndex
+        currentStageIndex++; 
         InitializeGame(); 
     }
     
@@ -277,7 +373,6 @@ public class RubikManager : MonoBehaviour
         Camera cam = Camera.main;
         if (cam == null) return;
         
-        // ★ 요청하신 코드 삭제하지 않고 유지!
         cam.transform.position = -cam.transform.forward * 50f;
         
         float mapW = width * tileSizeXZ;
@@ -293,11 +388,5 @@ public class RubikManager : MonoBehaviour
             float distance = targetSize / Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
             cam.transform.position = Vector3.zero - (cam.transform.forward * distance);
         }
-    }
-    
-    public void OnClickReset()
-    {
-        Debug.Log("스테이지를 다시 시작합니다.");
-        InitializeGame(); // 기존에 만들어둔 게임 초기화 함수 재실행
     }
 }
