@@ -191,8 +191,56 @@ void CreateObj(int id, int var, Vector3 pos, int layer, int x, int y)
     }
 
     TileData GetTileData(int id) { foreach(var d in tilePalette) if(d.tileID == id) return d; return null; }
-    void ClearMapVisuals() { if(objMap!=null) foreach(var o in transform) if(o!=objPlayer.transform && o!=transform) Destroy(((Transform)o).gameObject); }
+    void ClearMapVisuals() { 
+        if(objMap!=null) 
+        {
+            foreach(var o in transform) 
+            {
+                // o를 UnityEngine.Object 타입으로 명시적으로 변환하여 유니티 비교를 강제합니다.
+                if ((UnityEngine.Object)o != objPlayer.transform && (UnityEngine.Object)o != transform) 
+                {
+                    Destroy(((Transform)o).gameObject);
+                }
+            }
+        }
+    }
     IEnumerator ProcessFail() { isGameEnding=true; uiManager?.ShowFail(); yield return new WaitForSeconds(1.5f); InitializeGame(); }
     IEnumerator ProcessClear() { isGameEnding=true; uiManager?.ShowClear(); yield return new WaitForSeconds(1.5f); currentLevelIndex++; InitializeGame(); }
-    void AutoAdjustCamera() { Camera.main.transform.position = -Camera.main.transform.forward * 50f; }
+    void AutoAdjustCamera() { 
+        Camera cam = Camera.main;
+        if (cam == null) return;
+        cam.transform.position = -cam.transform.forward * 50f;
+        
+        // 1. 맵의 실제 물리적 크기 계산 (타일 개수 * 간격)
+        float mapW = width * tileSizeXZ;
+        float mapH = height * tileSizeXZ; // Z축 길이지만 화면상 높이로 취급
+
+        // 2. 여유 공간 (Padding) - 너무 꽉 차면 답답하니까
+        float padding = 2.0f;  
+
+        // 3. 카메라 설정에 따라 다르게 처리
+        if (cam.orthographic)
+        {
+            // [Orthographic 모드] Size 값을 조절
+            float vertSize = (mapH / 2f) + padding;
+            float horzSize = ((mapW / 2f) + padding) / cam.aspect; // 화면 비율(aspect) 고려
+            
+            // 세로와 가로 중 더 큰 쪽에 맞춤
+            cam.orthographicSize = Mathf.Max(vertSize, horzSize);
+        }
+        else
+        {
+            // [Perspective 모드] 카메라를 뒤로(Z축) 뺌
+            // 맵의 대각선 길이를 기준으로 적절한 거리를 계산합니다.
+            float targetSize = Mathf.Max(mapW, mapH) + padding * 2;
+            
+            // 시야각(FOV)에 따른 거리 계산 공식 (대략적)
+            // 거리가 멀어질수록 많이 보임
+            float distance = targetSize / Mathf.Tan(cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
+            
+            // 카메라가 바라보는 방향(Forward)의 반대편으로 이동
+            // 45도 각도로 보고 있다면, 그 각도 그대로 뒤로 쭉 물러납니다.
+            // cam.transform.position = Vector3.zero - (cam.transform.forward * distance);
+        }
+         }
 }
