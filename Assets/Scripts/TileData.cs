@@ -3,8 +3,8 @@ using System;
 
 public enum TileLayer
 {
-    Floor = 0,   // 바닥 (0층)
-    Object = 1,  // 물체 (1층)
+    Tile = 0,   // 바닥 (0층)
+    Ground = 1,  // 물체 (1층)
     Sky = 2      // 공중 (2층)
 }
 
