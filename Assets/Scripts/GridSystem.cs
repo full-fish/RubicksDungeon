@@ -6,28 +6,22 @@ public class GridSystem : MonoBehaviour
 {
     private int width;
     private int height;
-    
-    // 3차원 배열: [x, y, layer]
     private int[,,] maps; 
-    
     private TileData[] tilePalette;
+    
     public Vector2Int PlayerIndex { get; private set; }
 
+    // 이벤트
     public Action OnMapChanged;
     public Action OnPlayerMoved;
     public Action OnTrapTriggered;
     public Action OnGoalTriggered;
     
-    private const int PLAYER_LAYER = 1;
-
-    // ★ [핵심 수정] 매니저와 짝을 맞추기 위해 <TileData> 추가
+    // 오디오 신호 (매니저에게 전달)
     public Action<TileData> OnSoundWalk;    
     public Action<TileData> OnSoundPush;    
     public Action<TileData> OnSoundDestroy; 
-    
-    public Action OnSoundShift;   
-    public Action OnSoundSuccess; 
-    public Action OnSoundFail;    
+    public Action OnSoundShift; 
 
     public void Initialize(int w, int h, int[,,] loadedMaps, TileData[] palette, Vector2Int startPos)
     {
@@ -37,7 +31,7 @@ public class GridSystem : MonoBehaviour
         PlayerIndex = startPos;
         maps = loadedMaps; 
 
-        // 패킹
+        // 데이터 패킹 (랜덤 변형값 포함)
         for (int l = 0; l < 3; l++) {
             for (int x = 0; x < w; x++) {
                 for (int y = 0; y < h; y++) {
@@ -51,7 +45,6 @@ public class GridSystem : MonoBehaviour
         }
     }
 
-    // --- 데이터 조회 ---
     public int GetLayerID(int x, int y, int layer) {
         if (!IsInMap(x, y)) return 0;
         return maps[x, y, layer] & 0xFFFF; 
@@ -62,14 +55,14 @@ public class GridSystem : MonoBehaviour
         return (maps[x, y, layer] >> 16) & 0xFFFF; 
     }
 
-    private TileData GetTileDataFromPacked(int packedData) {
-        if (packedData == 0) return null;
+    public TileData GetTileDataFromPacked(int packedData) {
+        if (packedData == 0 || packedData == 65535) return null;
         int id = packedData & 0xFFFF;
         foreach (var data in tilePalette) if (data.tileID == id) return data;
         return null;
     }
 
-    // --- [1] 플레이어 이동 (수정됨) ---
+    // --- 플레이어 이동 로직 ---
     public bool TryMovePlayer(int dx, int dy)
     {
         int nextX = PlayerIndex.x + dx;
@@ -94,44 +87,33 @@ public class GridSystem : MonoBehaviour
             bool isFloorPassable = (destFloor == null) || (!destFloor.isStop);
 
             if (isDestPassable && isFloorPassable) {
+                // 함정 체크
                 bool isTrap = (destObj != null && destObj.isDead) || (destFloor != null && destFloor.isDead);
-
-                // ★ [수정] 현재 밀려는 박스 데이터 저장 (소리 재생용)
                 TileData boxToPush = nextObj;
 
-                if (isTrap)
-                {
-                    // 함정이면 박스 파괴
-                    maps[nextX, nextY, layer] = -1; 
-                    // ★ 파괴 소리에 데이터 실어 보냄
+                if (isTrap) {
+                    maps[nextX, nextY, layer] = -1; // 박스 파괴
                     OnSoundDestroy?.Invoke(boxToPush); 
-                }
-                else
-                {
-                    // 정상 이동
-                    maps[pushX, pushY, layer] = maps[nextX, nextY, layer]; 
+                } else {
+                    maps[pushX, pushY, layer] = maps[nextX, nextY, layer]; // 이동
                     maps[nextX, nextY, layer] = -1; 
-                    // ★ 밀기 소리에 데이터 실어 보냄
                     OnSoundPush?.Invoke(boxToPush); 
                 }
-
                 OnMapChanged?.Invoke();
             } else {
-                return false; // 막힘
+                return false; // 밀기 실패
             }
         }
         // 2. 벽 체크
         else if (IsStopAt(nextX, nextY)) {
             return false;
         }
-        // 3. 그냥 걷기 (밀기가 아님)
+        // 3. 걷기
         else {
-            // ★ [수정] 밟는 바닥의 데이터를 가져와서 소리 재생
             TileData floor = GetTileDataFromPacked(maps[nextX, nextY, 0]);
             OnSoundWalk?.Invoke(floor); 
         }
 
-        // 플레이어 좌표 갱신
         PlayerIndex = new Vector2Int(nextX, nextY);
         OnPlayerMoved?.Invoke();
         CheckFoot();
@@ -146,16 +128,13 @@ public class GridSystem : MonoBehaviour
         return false;
     }
 
-    // --- [2] 맵 회전 (Shift) ---
+    // --- 맵 회전 로직 ---
     public bool TryPushRow(int dir)
     {
         if (!CanPushRow(PlayerIndex.y)) return false;
-        
-        OnSoundShift?.Invoke(); // 회전 소리
+        OnSoundShift?.Invoke();
         ShiftRow(PlayerIndex.y, -dir); 
-        
-        if (!ResolveCollision(-dir, true))
-        {
+        if (!ResolveCollision(-dir, true)) {
             ShiftRow(PlayerIndex.y, dir);
             return false;
         }
@@ -165,19 +144,15 @@ public class GridSystem : MonoBehaviour
     public bool TryPushCol(int dir)
     {
         if (!CanPushCol(PlayerIndex.x)) return false;
-        
-        OnSoundShift?.Invoke(); // 회전 소리
+        OnSoundShift?.Invoke();
         ShiftCol(PlayerIndex.x, -dir);
-        
-        if (!ResolveCollision(-dir, false))
-        {
+        if (!ResolveCollision(-dir, false)) {
             ShiftCol(PlayerIndex.x, dir);
             return false;
         }
         return true;
     }
 
-    // --- [3] 충돌 해결 ---
     bool ResolveCollision(int dir, bool isRow) {
         if (!HandleLayerCollision(1, dir, isRow)) return false;
         CheckFoot();
@@ -187,54 +162,40 @@ public class GridSystem : MonoBehaviour
     bool HandleLayerCollision(int layer, int dir, bool isRow) {
         int packedData = maps[PlayerIndex.x, PlayerIndex.y, layer];
         TileData tile = GetTileDataFromPacked(packedData);
-
         if (tile == null) return true; 
 
         bool isBlocked = false;
-
-        // 1. Push 속성 확인
         if (tile.isPush) {
             if (TryPushChain(PlayerIndex.x, PlayerIndex.y, dir, isRow, layer)) {
                 OnMapChanged?.Invoke();
                 return true; 
-            } else {
-                isBlocked = true; 
-            }
+            } else isBlocked = true; 
         }
 
-        // 2. Stop 속성 및 막힘 처리
         if (tile.isStop || isBlocked) {
             int newX = PlayerIndex.x + (isRow ? dir : 0);
             int newY = PlayerIndex.y + (isRow ? 0 : dir);
-            
             if (IsInMap(newX, newY)) {
                 PlayerIndex = new Vector2Int(newX, newY);
                 OnPlayerMoved?.Invoke();
                 return true;
-            } else {
-                return false; 
-            }
+            } else return false; 
         }
         return true;
     }
 
-    // 연쇄 밀기 로직
     bool TryPushChain(int startX, int startY, int dir, bool isRow, int layer) {
         int loopCount = isRow ? width : height;
         List<Vector2Int> chainCoords = new List<Vector2Int>();
         List<int> chainData = new List<int>();
-
-        int curX = startX;
-        int curY = startY;
-
+        int curX = startX; int curY = startY;
         bool hitTrap = false; 
 
         for (int i = 0; i < loopCount; i++) {
             chainCoords.Add(new Vector2Int(curX, curY));
             chainData.Add(maps[curX, curY, layer]);
 
-            int nextX = curX;
-            int nextY = curY;
+            int nextX = curX; int nextY = curY;
             if (isRow) nextX = GetWrappedIndex(curX - dir, width);
             else       nextY = GetWrappedIndex(curY - dir, height);
 
@@ -243,9 +204,7 @@ public class GridSystem : MonoBehaviour
 
             if (nextTile == null) {
                 if (floorTile != null && floorTile.isStop) return false; 
-                
                 if (floorTile != null && floorTile.isDead) hitTrap = true;
-
                 chainCoords.Add(new Vector2Int(nextX, nextY));
                 break; 
             }
@@ -255,13 +214,9 @@ public class GridSystem : MonoBehaviour
                 break; 
             }
             else if (nextTile.isPush) {
-                curX = nextX;
-                curY = nextY;
-                continue;
+                curX = nextX; curY = nextY; continue;
             }
-            else if (nextTile.isStop) {
-                return false; 
-            }
+            else if (nextTile.isStop) return false; 
             else {
                 chainCoords.Add(new Vector2Int(nextX, nextY));
                 break;
@@ -272,49 +227,31 @@ public class GridSystem : MonoBehaviour
 
         for (int i = 0; i < chainData.Count; i++) {
             Vector2Int dest = chainCoords[i + 1];
-            
-            // 만약 이번이 맨 앞 상자이고, 함정에 빠진 상태라면
             if (hitTrap && i == chainData.Count - 1) {
                 int dyingBoxID = chainData[i];
                 TileData dyingBox = GetTileDataFromPacked(dyingBoxID);
-                
-                // ★ 파괴 소리에 데이터 실어 보냄
                 OnSoundDestroy?.Invoke(dyingBox);
-                
-                // 함정 자리에 덮어쓰지 않음 (상자 소멸)
             }
-            else {
-                maps[dest.x, dest.y, layer] = chainData[i];
-            }
+            else maps[dest.x, dest.y, layer] = chainData[i];
         }
-
         maps[startX, startY, layer] = -1;
-
         return true;
     }
 
-    // --- 유틸리티 ---
     void CheckFoot() {
-        int myLayerData = maps[PlayerIndex.x, PlayerIndex.y, PLAYER_LAYER];
-        CheckLayerEvent(myLayerData);
-    }
-    void CheckLayerEvent(int packedData) {
-        TileData t = GetTileDataFromPacked(packedData);
+        int myLayerData = maps[PlayerIndex.x, PlayerIndex.y, 1];
+        TileData t = GetTileDataFromPacked(myLayerData);
         if (t != null) {
             if (t.isDead) OnTrapTriggered?.Invoke();
             if (t.isGoal) OnGoalTriggered?.Invoke();
         }
     }
     bool CanPushRow(int y) {
-        for (int x = 0; x < width; x++)
-            for (int l = 0; l < 3; l++) 
-                if (IsFixed(x, y, l)) return false;
+        for (int x = 0; x < width; x++) for (int l = 0; l < 3; l++) if (IsFixed(x, y, l)) return false;
         return true;
     }
     bool CanPushCol(int x) {
-        for (int y = 0; y < height; y++)
-            for (int l = 0; l < 3; l++)
-                if (IsFixed(x, y, l)) return false;
+        for (int y = 0; y < height; y++) for (int l = 0; l < 3; l++) if (IsFixed(x, y, l)) return false;
         return true;
     }
     bool IsFixed(int x, int y, int l) {
@@ -337,8 +274,7 @@ public class GridSystem : MonoBehaviour
     bool IsInMap(int x, int y) => x >= 0 && x < width && y >= 0 && y < height;
     int GetWrappedIndex(int index, int max) => (index % max + max) % max;
     public int[,,] GetMapSnapshot() => (int[,,])maps.Clone();
-    public void RestoreMapData(int[,,] savedMap, Vector2Int savedPlayerIndex)
-    {
+    public void RestoreMapData(int[,,] savedMap, Vector2Int savedPlayerIndex) {
         maps = savedMap;
         PlayerIndex = savedPlayerIndex;
         OnMapChanged?.Invoke(); 

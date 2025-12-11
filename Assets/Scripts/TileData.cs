@@ -1,44 +1,33 @@
 using UnityEngine;
 using System;
 
-public enum TileLayer
-{
-    Tile = 0,   // 바닥 (0층)
-    Ground = 1,  // 물체 (1층)
-    Sky = 2      // 공중 (2층)
-}
+public enum TileLayer { Tile = 0, Ground = 1, Sky = 2 }
 
-[CreateAssetMenu(fileName = "New Tile", menuName = "Rubik/Tile Data")]
+[CreateAssetMenu(fileName = "New Tile", menuName = "Game/Tile Data")]
 public class TileData : ScriptableObject
 {
     public int tileID;
 
-    [Header("사운드 설정")]
-    public AudioClip clipPush;    // 이 물체가 밀릴 때 소리
-    public AudioClip clipDestroy; // 이 물체가 파괴될 때 소리
-    public AudioClip clipStep;    // (선택) 이 위를 걸을 때 소리
-    [Header("비주얼 설정")]
+    [Header("비주얼")]
     public VisualVariant[] variants; 
 
-    // ★ [핵심] 층수 설정 (hasFloorUnder 대체)
-    [Header("배치 속성")]
+    [Header("속성")]
     public TileLayer layerType; 
-
-    [Tooltip("1이면 매니저 설정 그대로, 2면 2배 높게")]
     public float heightMultiplier = 1.0f;
 
-    [Header("이동 관련")]
+    [Header("이동 규칙")]
     public bool isStop;       
     public bool isPush;       
     public bool isShift;      
 
-    [Header("이벤트 관련")]
+    [Header("이벤트")]
     public bool isDead;       
     public bool isGoal;       
 
-    [Header("속성 관련")]
-    public bool isFire;       
-    public bool isIce;        
+    [Header("전용 사운드 (비워두면 기본음)")]
+    public AudioClip clipStep;    
+    public AudioClip clipPush;    
+    public AudioClip clipDestroy; 
 
     public VisualVariant GetVariantByWeight(int randomVal) 
     {
