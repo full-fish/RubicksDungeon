@@ -65,7 +65,7 @@ public class RubikManager : MonoBehaviour
 
     [Header("애니메이션 설정")]
     public float moveDuration = 0.2f; 
-    private bool isAnimating = false; 
+    private bool isAnimating = false; // 애니메이션 중 입력/갱신 차단
 
     private Stack<GameState> undoStack = new Stack<GameState>();
 
@@ -255,20 +255,88 @@ public class RubikManager : MonoBehaviour
         InitializeGame();
     }
 
+    // --- [캐릭터 이동 애니메이션 수정] ---
+
     public void TryMovePlayer(int dx, int dy) { 
         if(!isGameEnding && !isAnimating) { 
-            SaveState(); 
-            Quaternion beforeRot = objPlayer != null ? objPlayer.transform.rotation : Quaternion.identity;
             RotatePlayer(dx, dy); 
-            Quaternion afterRot = objPlayer != null ? objPlayer.transform.rotation : Quaternion.identity;
-
-            bool isMoved = gridSystem.TryMovePlayer(dx, dy);
-
-            if (!isMoved && beforeRot == afterRot)
-            {
-                undoStack.Pop(); 
-            }
+            StartCoroutine(AnimateMove(dx, dy));
         } 
+    }
+
+    // ★ [핵심 수정] 캐릭터 이동 및 밀기 애니메이션
+    IEnumerator AnimateMove(int dx, int dy)
+    {
+        SaveState();
+        isAnimating = true;
+
+        Vector2Int oldPos = gridSystem.PlayerIndex;
+        Quaternion beforeRot = objPlayer != null ? objPlayer.transform.rotation : Quaternion.identity;
+        
+        // 1. [사전 체크] 내가 가려는 곳에 있는 게 '밀 수 있는 상자'인지 미리 확인
+        Vector2Int targetPos = oldPos + new Vector2Int(dx, dy);
+        
+        // GridSystem에서 해당 위치의 타일 ID를 가져옴 (로직 실행 전이라 데이터 유효함)
+        int targetId = gridSystem.GetLayerID(targetPos.x, targetPos.y, 1);
+        TileData targetTile = GetTileData(targetId);
+        
+        // ★ 핵심: 그 물체가 실제로 'isPush' 속성이 있는지 확인
+        bool isPushableObj = (targetTile != null && targetTile.isPush);
+
+        // 2. [로직 실행] 데이터 이동
+        bool success = gridSystem.TryMovePlayer(dx, dy);
+
+        if (success)
+        {
+            // --- 애니메이션 준비 ---
+            Transform playerT = objPlayer.transform;
+            Vector3 pStart = GetWorldPos(oldPos); 
+            Vector3 pEnd = GetWorldPos(oldPos + new Vector2Int(dx, dy));
+
+            // B. 박스 애니메이션 준비
+            Transform boxT = null;
+            Vector3 bStart = Vector3.zero;
+            Vector3 bEnd = Vector3.zero;
+
+            // ★ [수정됨] "시각적으로 존재하고" AND "밀 수 있는 물체(isPushableObj)"일 때만 움직임
+            // 이렇게 하면 보물상자(Goal)나 함정(Trap)은 움직이지 않고 플레이어만 겹쳐 지나감
+            if (IsBoxAt(targetPos) && isPushableObj)
+            {
+                boxT = objMap[targetPos.x, targetPos.y].transform;
+                bStart = boxT.position;
+                bEnd = bStart + new Vector3(dx * tileSizeXZ, 0, dy * tileSizeXZ);
+            }
+
+            // --- Lerp 이동 ---
+            float elapsed = 0f;
+            while (elapsed < moveDuration)
+            {
+                elapsed += Time.deltaTime;
+                float t = elapsed / moveDuration;
+                t = t * t * (3f - 2f * t); 
+
+                if (playerT != null) 
+                    playerT.position = Vector3.Lerp(pStart, pEnd, t);
+                
+                if (boxT != null)
+                    boxT.position = Vector3.Lerp(bStart, bEnd, t);
+
+                yield return null;
+            }
+            
+            if (playerT != null) playerT.position = pEnd;
+            if (boxT != null && boxT.gameObject != null) boxT.position = bEnd;
+        }
+        else
+        {
+            Quaternion afterRot = objPlayer != null ? objPlayer.transform.rotation : Quaternion.identity;
+            if (beforeRot == afterRot) undoStack.Pop(); 
+        }
+
+        isAnimating = false;
+        
+        UpdateView();
+        UpdatePlayerVis(); 
     }
 
     // --- [맵 회전 입력 및 애니메이션] ---
@@ -327,20 +395,45 @@ public class RubikManager : MonoBehaviour
         int visualDir = -dir; 
 
         List<Transform> movingObjs = new List<Transform>();
+        
+        // ★ [수정] 맵의 오브젝트들을 담을 때 "조건"을 확인
         for (int x = 0; x < width; x++)
         {
-            if (objMap[x, y] != null) movingObjs.Add(objMap[x, y].transform);
+            if (objMap[x, y] != null) 
+            {
+                // 예상 도착 지점 계산 (Wrapped Index)
+                int nextX = (x + visualDir + width) % width;
+                Vector2Int targetPos = new Vector2Int(nextX, y);
+
+                // ★ [핵심 조건]
+                // "내가 가려는 곳(targetPos)이 플레이어의 현재 위치(gridSystem.PlayerIndex)이고"
+                // "플레이어가 이번 턴에 움직이지 않았다면(!movePlayer)"
+                // => 상자는 움직이지 않고 제자리에 있어야 함 (애니메이션 리스트 제외)
+                if (targetPos == gridSystem.PlayerIndex && !movePlayer)
+                {
+                    continue; 
+                }
+
+                movingObjs.Add(objMap[x, y].transform);
+            }
         }
         
+        // 플레이어 추가
         if (movePlayer && objPlayer != null)
         {
             movingObjs.Add(objPlayer.transform);
         }
 
+        // Ghost 생성 (순환 연출)
+        // 단, Ghost도 도착지점이 플레이어라면 생성하지 말아야 함
         GameObject ghostObj = null;
         int wrapIndex = (visualDir == 1) ? width - 1 : 0; 
+        int ghostDestX = (visualDir == 1) ? 0 : width - 1; // Ghost가 도착할 인덱스
         
-        if (objMap[wrapIndex, y] != null)
+        // Ghost 조건 체크
+        bool ghostBlocked = (new Vector2Int(ghostDestX, y) == gridSystem.PlayerIndex && !movePlayer);
+
+        if (objMap[wrapIndex, y] != null && !ghostBlocked)
         {
             ghostObj = Instantiate(objMap[wrapIndex, y]); 
             float startX = (visualDir == 1) ? -1 : width;
@@ -350,6 +443,7 @@ public class RubikManager : MonoBehaviour
             movingObjs.Add(ghostObj.transform);
         }
 
+        // --- Lerp 이동 (기존과 동일) ---
         float elapsed = 0f;
         Dictionary<Transform, Vector3> startPositions = new Dictionary<Transform, Vector3>();
         Dictionary<Transform, Vector3> endPositions = new Dictionary<Transform, Vector3>();
@@ -376,7 +470,7 @@ public class RubikManager : MonoBehaviour
 
         if (ghostObj != null) Destroy(ghostObj);
 
-        UseShiftChance(); // ★ 여기가 에러 나던 곳 -> 아래 함수 추가로 해결
+        UseShiftChance(); 
         isAnimating = false;
         
         UpdateView(); 
@@ -390,7 +484,19 @@ public class RubikManager : MonoBehaviour
         List<Transform> movingObjs = new List<Transform>();
         for (int y = 0; y < height; y++)
         {
-            if (objMap[x, y] != null) movingObjs.Add(objMap[x, y].transform);
+            if (objMap[x, y] != null) 
+            {
+                int nextY = (y + visualDir + height) % height;
+                Vector2Int targetPos = new Vector2Int(x, nextY);
+
+                // ★ [핵심 조건] 도착지에 안 비키는 플레이어가 있으면 이동 제외
+                if (targetPos == gridSystem.PlayerIndex && !movePlayer)
+                {
+                    continue;
+                }
+
+                movingObjs.Add(objMap[x, y].transform);
+            }
         }
 
         if (movePlayer && objPlayer != null)
@@ -398,8 +504,10 @@ public class RubikManager : MonoBehaviour
 
         GameObject ghostObj = null;
         int wrapIndex = (visualDir == 1) ? height - 1 : 0; 
+        int ghostDestY = (visualDir == 1) ? 0 : height - 1;
+        bool ghostBlocked = (new Vector2Int(x, ghostDestY) == gridSystem.PlayerIndex && !movePlayer);
 
-        if (objMap[x, wrapIndex] != null)
+        if (objMap[x, wrapIndex] != null && !ghostBlocked)
         {
             ghostObj = Instantiate(objMap[x, wrapIndex]);
             float startY = (visualDir == 1) ? -1 : height;
@@ -435,14 +543,13 @@ public class RubikManager : MonoBehaviour
 
         if (ghostObj != null) Destroy(ghostObj);
 
-        UseShiftChance(); // ★ 여기가 에러 나던 곳 -> 아래 함수 추가로 해결
+        UseShiftChance();
         isAnimating = false;
         
         UpdateView(); 
         UpdatePlayerVis();
     }
 
-    // ★ [추가된 함수] 누락되었던 횟수 차감 및 UI 갱신 함수
     void UseShiftChance()
     {
         _currentShifts--;
@@ -508,6 +615,7 @@ public class RubikManager : MonoBehaviour
 
     void UpdateView()
     {
+        // ★ [핵심] 애니메이션 중에는 화면 갱신 절대 금지
         if (isAnimating) return; 
 
         ClearMapVisuals();
@@ -567,14 +675,31 @@ public class RubikManager : MonoBehaviour
     }
 
     void UpdatePlayerVis() {
+        // ★ [핵심] 애니메이션 중에는 이벤트가 와도 위치 갱신 무시
+        if (isAnimating) return;
+
         if (objPlayer == null) {
             objPlayer = Instantiate(prefabPlayer);
             objPlayer.transform.parent = transform;
             objPlayer.AddComponent<RubikPlayer>().Init(this);
         }
         Vector2Int i = gridSystem.PlayerIndex;
-        float oX = width/2f - 0.5f, oZ = height/2f - 0.5f;
-        objPlayer.transform.position = new Vector3(i.x - oX, 0f, i.y - oZ);
+        // 월드 좌표 계산 헬퍼 함수 사용
+        objPlayer.transform.position = GetWorldPos(i);
+    }
+
+    // ★ 좌표 변환 헬퍼 함수
+    Vector3 GetWorldPos(Vector2Int index)
+    {
+        float oX = width / 2f - 0.5f;
+        float oZ = height / 2f - 0.5f;
+        return new Vector3(index.x - oX, 0f, index.y - oZ);
+    }
+
+    bool IsBoxAt(Vector2Int pos)
+    {
+        if (pos.x < 0 || pos.x >= width || pos.y < 0 || pos.y >= height) return false;
+        return objMap[pos.x, pos.y] != null;
     }
 
     void RotatePlayer(int dx, int dy) {
