@@ -7,13 +7,14 @@ public class PlayerController : MonoBehaviour
 
     [Header("입력 민감도 설정")]
     public float initialDelay = 0.3f; 
-    public float repeatRate = 0.15f; // 연속 이동 시 쿨타임 (너무 빠르면 늘리세요)
+    public float repeatRate = 0.15f; 
     private float _nextInputTime = 0f; 
 
     [Header("모바일 스와이프 설정")]
     public float minSwipeDistance = 50f; 
     private Vector2 _touchStartPos;
     private bool _isSwiping = false;
+    private bool _isControlCharacter = true; 
 
     public void Init(GameManager manager)
     {
@@ -24,20 +25,17 @@ public class PlayerController : MonoBehaviour
     {
         if (_manager == null) return;
 
-        // 1. 키보드 입력
         if (Keyboard.current != null)
         {
             HandleKeyboardInput();
         }
 
-        // 2. 포인터(마우스/터치) 스와이프 입력
         if (Pointer.current != null)
         {
             HandleSwipeInput();
         }
     }
 
-    // --- [PC] 키보드 입력 처리 ---
     void HandleKeyboardInput()
     {
         if (CheckKey(Key.RightArrow))      _manager.TryMovePlayer(1, 0);
@@ -54,60 +52,85 @@ public class PlayerController : MonoBehaviour
         else if (Keyboard.current[Key.R].wasPressedThisFrame) _manager.OnClickReset();
     }
 
-    // --- [Mobile/PC] 연속 스와이프 로직 ---
     void HandleSwipeInput()
     {
-        // 1. 누르는 순간 (기준점 잡기)
         if (Pointer.current.press.wasPressedThisFrame)
         {
             _touchStartPos = Pointer.current.position.ReadValue();
+            
+            // 화면 분할 로직
+            if (_touchStartPos.x > Screen.width / 2f)
+            {
+                _isControlCharacter = true;
+            }
+            else
+            {
+                _isControlCharacter = false;
+            }
+
             _isSwiping = true;
         }
         
-        // 2. 누르고 있는 동안 (실시간 거리 체크)
         else if (Pointer.current.press.isPressed && _isSwiping)
         {
             Vector2 currentPos = Pointer.current.position.ReadValue();
             Vector2 swipeVector = currentPos - _touchStartPos;
 
-            // 최소 거리 이상 움직였는지 확인
             if (swipeVector.magnitude >= minSwipeDistance)
             {
-                // 쿨타임 체크 (너무 빠른 연속 입력 방지)
                 if (Time.time >= _nextInputTime)
                 {
-                    ProcessSwipe(swipeVector);
+                    if (_isControlCharacter)
+                    {
+                        ProcessCharacterMove(swipeVector);
+                    }
+                    else
+                    {
+                        ProcessMapShift(swipeVector);
+                    }
                     
-                    // ★ [핵심] 이동했으면 기준점을 현재 위치로 갱신!
-                    // 그래야 손을 안 떼고 계속 밀었을 때 다음 이동이 발동됨
                     _touchStartPos = currentPos; 
-                    
-                    // 쿨타임 적용
                     _nextInputTime = Time.time + repeatRate;
                 }
             }
         }
-
-        // 3. 떼는 순간 (초기화)
         else if (Pointer.current.press.wasReleasedThisFrame)
         {
             _isSwiping = false;
         }
     }
 
-    void ProcessSwipe(Vector2 swipeVector)
+    void ProcessCharacterMove(Vector2 swipeVector)
     {
-        // X축 이동량이 Y축보다 크면 -> 가로 이동
         if (Mathf.Abs(swipeVector.x) > Mathf.Abs(swipeVector.y))
         {
             if (swipeVector.x > 0) _manager.TryMovePlayer(1, 0); 
             else                   _manager.TryMovePlayer(-1, 0); 
         }
-        // Y축 이동량이 더 크면 -> 세로 이동
         else
         {
             if (swipeVector.y > 0) _manager.TryMovePlayer(0, 1);  
             else                   _manager.TryMovePlayer(0, -1); 
+        }
+    }
+
+    // ★ [수정됨] 맵 회전 방향 반전
+    void ProcessMapShift(Vector2 swipeVector)
+    {
+        if (Mathf.Abs(swipeVector.x) > Mathf.Abs(swipeVector.y))
+        {
+            // 가로 스와이프
+            // 오른쪽(x>0)으로 밀면 -> 왼쪽(-1)으로 이동
+            if (swipeVector.x > 0) _manager.TryPushRow(-1); // 기존 1 -> -1 변경
+            else                   _manager.TryPushRow(1);  // 기존 -1 -> 1 변경
+        }
+        else
+        {
+            // 세로 스와이프
+            // 위로(y>0) 밀면 -> 아래쪽(-1)으로 이동 (또는 반대)
+            // (만약 이것도 반대라면 -1과 1을 서로 또 바꿔주세요)
+            if (swipeVector.y > 0) _manager.TryPushCol(-1); // 기존 1 -> -1 변경
+            else                   _manager.TryPushCol(1);  // 기존 -1 -> 1 변경
         }
     }
 

@@ -2315,7 +2315,7 @@ MonoBehaviour:
   - {fileID: 4900000, guid: 6c9e95b06ffc6664ca19ea457c516e7b, type: 3}
   - {fileID: 4900000, guid: 32f8ccc5d979e2141bf0db2fda32cde2, type: 3}
   - {fileID: 4900000, guid: 61b67cf964d026447b2b67c71bc67bf1, type: 3}
-  prefabPlayer: {fileID: 919132149155446097, guid: 604af00924303174b97bb315f094e617, type: 3}
+  prefabPlayer: {fileID: 719977876504732738, guid: fd7cdef85381096479d6d36229853a3e, type: 3}
   maxShiftCount: 10
   currentStageIndex: 0
 --- !u!4 &1742683509
@@ -2734,7 +2734,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::VisualManager
   tileSizeXZ: 0.8
   tileHeight: 0.2
-  moveDuration: 0.2
+  moveDuration: 0.15
 --- !u!4 &2083190512
 Transform:
   m_ObjectHideFlags: 0
