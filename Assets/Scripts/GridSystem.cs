@@ -7,29 +7,27 @@ public class GridSystem : MonoBehaviour
     private int width;
     private int height;
     
-    // 3D Array: [x, y, layer]
+    // 3차원 배열: [x, y, layer]
     private int[,,] maps; 
     
     private TileData[] tilePalette;
     public Vector2Int PlayerIndex { get; private set; }
 
-    // --- Core Game Events ---
     public Action OnMapChanged;
     public Action OnPlayerMoved;
     public Action OnTrapTriggered;
     public Action OnGoalTriggered;
     
-    // --- Audio Events (Sending TileData for specific sounds) ---
-    public Action<TileData> OnSoundWalk;    // Walking (sends Floor TileData)
-    public Action<TileData> OnSoundPush;    // Pushing (sends Box TileData)
-    public Action<TileData> OnSoundDestroy; // Destroying (sends Box TileData)
+    private const int PLAYER_LAYER = 1;
+
+    // ★ [핵심 수정] 매니저와 짝을 맞추기 위해 <TileData> 추가
+    public Action<TileData> OnSoundWalk;    
+    public Action<TileData> OnSoundPush;    
+    public Action<TileData> OnSoundDestroy; 
     
-    // These events don't need specific tile data usually, but can stay as simple Actions
     public Action OnSoundShift;   
     public Action OnSoundSuccess; 
     public Action OnSoundFail;    
-
-    private const int PLAYER_LAYER = 1;
 
     public void Initialize(int w, int h, int[,,] loadedMaps, TileData[] palette, Vector2Int startPos)
     {
@@ -39,7 +37,7 @@ public class GridSystem : MonoBehaviour
         PlayerIndex = startPos;
         maps = loadedMaps; 
 
-        // Packing Data
+        // 패킹
         for (int l = 0; l < 3; l++) {
             for (int x = 0; x < w; x++) {
                 for (int y = 0; y < h; y++) {
@@ -53,7 +51,7 @@ public class GridSystem : MonoBehaviour
         }
     }
 
-    // --- Data Retrieval ---
+    // --- 데이터 조회 ---
     public int GetLayerID(int x, int y, int layer) {
         if (!IsInMap(x, y)) return 0;
         return maps[x, y, layer] & 0xFFFF; 
@@ -65,18 +63,13 @@ public class GridSystem : MonoBehaviour
     }
 
     private TileData GetTileDataFromPacked(int packedData) {
-        if (packedData == 0) return null; // 0 means empty/null in packed data context if not using -1
+        if (packedData == 0) return null;
         int id = packedData & 0xFFFF;
-        // Logic to handle -1 as empty if passed raw, though usually masking handles it.
-        // Assuming your map data uses -1 for empty in logic but packed might differ.
-        // If packedData is -1, it returns null.
-        if (id == 65535) return null; // -1 in 16bit unsigned check usually
-        
         foreach (var data in tilePalette) if (data.tileID == id) return data;
         return null;
     }
 
-    // --- [1] Player Movement ---
+    // --- [1] 플레이어 이동 (수정됨) ---
     public bool TryMovePlayer(int dx, int dy)
     {
         int nextX = PlayerIndex.x + dx;
@@ -87,7 +80,7 @@ public class GridSystem : MonoBehaviour
         int layer = 1;
         TileData nextObj = GetTileDataFromPacked(maps[nextX, nextY, layer]);
 
-        // 1. Try Pushing
+        // 1. 밀기 시도
         if (nextObj != null && nextObj.isPush) {
             int pushX = nextX + dx;
             int pushY = nextY + dy;
@@ -97,49 +90,48 @@ public class GridSystem : MonoBehaviour
             TileData destObj = GetTileDataFromPacked(maps[pushX, pushY, layer]);
             TileData destFloor = GetTileDataFromPacked(maps[pushX, pushY, 0]);
 
-            // Check if destination is passable (Empty or Not Stop)
             bool isDestPassable = (destObj == null) || (!destObj.isStop);
             bool isFloorPassable = (destFloor == null) || (!destFloor.isStop);
 
             if (isDestPassable && isFloorPassable) {
-                // Check if destination is a Trap (isDead)
-                // If destObj is a trap OR destFloor is a trap
                 bool isTrap = (destObj != null && destObj.isDead) || (destFloor != null && destFloor.isDead);
-                
-                // Store the box data for sound event before potentially destroying it
-                TileData boxData = nextObj; 
+
+                // ★ [수정] 현재 밀려는 박스 데이터 저장 (소리 재생용)
+                TileData boxToPush = nextObj;
 
                 if (isTrap)
                 {
-                    // Destroy Box: Clear current position, do not move to new position
+                    // 함정이면 박스 파괴
                     maps[nextX, nextY, layer] = -1; 
-                    OnSoundDestroy?.Invoke(boxData); // Play specific destroy sound
+                    // ★ 파괴 소리에 데이터 실어 보냄
+                    OnSoundDestroy?.Invoke(boxToPush); 
                 }
                 else
                 {
-                    // Normal Move
+                    // 정상 이동
                     maps[pushX, pushY, layer] = maps[nextX, nextY, layer]; 
                     maps[nextX, nextY, layer] = -1; 
-                    OnSoundPush?.Invoke(boxData);    // Play specific push sound
+                    // ★ 밀기 소리에 데이터 실어 보냄
+                    OnSoundPush?.Invoke(boxToPush); 
                 }
 
                 OnMapChanged?.Invoke();
             } else {
-                return false; // Cannot push (blocked)
+                return false; // 막힘
             }
         }
-        // 2. Wall Check (If not pushable or push failed)
+        // 2. 벽 체크
         else if (IsStopAt(nextX, nextY)) {
             return false;
         }
-        // 3. Normal Walk
+        // 3. 그냥 걷기 (밀기가 아님)
         else {
-             // Get floor data for walking sound
-             TileData floorData = GetTileDataFromPacked(maps[nextX, nextY, 0]);
-             OnSoundWalk?.Invoke(floorData); // Play specific floor sound
+            // ★ [수정] 밟는 바닥의 데이터를 가져와서 소리 재생
+            TileData floor = GetTileDataFromPacked(maps[nextX, nextY, 0]);
+            OnSoundWalk?.Invoke(floor); 
         }
 
-        // 4. Update Player Position
+        // 플레이어 좌표 갱신
         PlayerIndex = new Vector2Int(nextX, nextY);
         OnPlayerMoved?.Invoke();
         CheckFoot();
@@ -154,17 +146,17 @@ public class GridSystem : MonoBehaviour
         return false;
     }
 
-    // --- [2] Map Shifting ---
+    // --- [2] 맵 회전 (Shift) ---
     public bool TryPushRow(int dir)
     {
         if (!CanPushRow(PlayerIndex.y)) return false;
         
-        OnSoundShift?.Invoke(); // Play shift sound
-        ShiftRow(PlayerIndex.y, -dir);
+        OnSoundShift?.Invoke(); // 회전 소리
+        ShiftRow(PlayerIndex.y, -dir); 
         
         if (!ResolveCollision(-dir, true))
         {
-            ShiftRow(PlayerIndex.y, dir); // Undo shift if collision fails
+            ShiftRow(PlayerIndex.y, dir);
             return false;
         }
         return true;
@@ -174,7 +166,7 @@ public class GridSystem : MonoBehaviour
     {
         if (!CanPushCol(PlayerIndex.x)) return false;
         
-        OnSoundShift?.Invoke(); // Play shift sound
+        OnSoundShift?.Invoke(); // 회전 소리
         ShiftCol(PlayerIndex.x, -dir);
         
         if (!ResolveCollision(-dir, false))
@@ -185,7 +177,7 @@ public class GridSystem : MonoBehaviour
         return true;
     }
 
-    // --- [3] Collision Resolution ---
+    // --- [3] 충돌 해결 ---
     bool ResolveCollision(int dir, bool isRow) {
         if (!HandleLayerCollision(1, dir, isRow)) return false;
         CheckFoot();
@@ -200,7 +192,7 @@ public class GridSystem : MonoBehaviour
 
         bool isBlocked = false;
 
-        // 1. Check Push Property
+        // 1. Push 속성 확인
         if (tile.isPush) {
             if (TryPushChain(PlayerIndex.x, PlayerIndex.y, dir, isRow, layer)) {
                 OnMapChanged?.Invoke();
@@ -210,9 +202,8 @@ public class GridSystem : MonoBehaviour
             }
         }
 
-        // 2. Check Stop or Blocked
+        // 2. Stop 속성 및 막힘 처리
         if (tile.isStop || isBlocked) {
-            // Push player out
             int newX = PlayerIndex.x + (isRow ? dir : 0);
             int newY = PlayerIndex.y + (isRow ? 0 : dir);
             
@@ -221,14 +212,13 @@ public class GridSystem : MonoBehaviour
                 OnPlayerMoved?.Invoke();
                 return true;
             } else {
-                return false; // Player pushed out of map bounds
+                return false; 
             }
         }
-
         return true;
     }
 
-    // Chain Push Logic (Handles destruction on traps)
+    // 연쇄 밀기 로직
     bool TryPushChain(int startX, int startY, int dir, bool isRow, int layer) {
         int loopCount = isRow ? width : height;
         List<Vector2Int> chainCoords = new List<Vector2Int>();
@@ -239,7 +229,6 @@ public class GridSystem : MonoBehaviour
 
         bool hitTrap = false; 
 
-        // 1. Analyze the chain
         for (int i = 0; i < loopCount; i++) {
             chainCoords.Add(new Vector2Int(curX, curY));
             chainData.Add(maps[curX, curY, layer]);
@@ -252,33 +241,27 @@ public class GridSystem : MonoBehaviour
             TileData nextTile = GetTileDataFromPacked(maps[nextX, nextY, layer]);
             TileData floorTile = GetTileDataFromPacked(maps[nextX, nextY, 0]);
 
-            // A. Empty Space
             if (nextTile == null) {
-                if (floorTile != null && floorTile.isStop) return false; // Blocked by floor wall/hole
+                if (floorTile != null && floorTile.isStop) return false; 
                 
-                // If floor is trap, mark it
                 if (floorTile != null && floorTile.isDead) hitTrap = true;
 
                 chainCoords.Add(new Vector2Int(nextX, nextY));
                 break; 
             }
-            // B. Object is Trap
             else if (nextTile.isDead) {
                 hitTrap = true; 
                 chainCoords.Add(new Vector2Int(nextX, nextY));
                 break; 
             }
-            // C. Pushable Object -> Continue Chain
             else if (nextTile.isPush) {
                 curX = nextX;
                 curY = nextY;
                 continue;
             }
-            // D. Wall/Stop -> Blocked
             else if (nextTile.isStop) {
                 return false; 
             }
-            // E. Passable -> Treat as empty
             else {
                 chainCoords.Add(new Vector2Int(nextX, nextY));
                 break;
@@ -287,34 +270,30 @@ public class GridSystem : MonoBehaviour
 
         if (!hitTrap && chainCoords.Count == chainData.Count) return false;
 
-        // 2. Execute Movement (Back to Front)
         for (int i = 0; i < chainData.Count; i++) {
             Vector2Int dest = chainCoords[i + 1];
             
-            // If this is the leading box and it hit a trap
+            // 만약 이번이 맨 앞 상자이고, 함정에 빠진 상태라면
             if (hitTrap && i == chainData.Count - 1) {
                 int dyingBoxID = chainData[i];
                 TileData dyingBox = GetTileDataFromPacked(dyingBoxID);
                 
-                // Trigger Destroy Sound
-                OnSoundDestroy?.Invoke(dyingBox); 
+                // ★ 파괴 소리에 데이터 실어 보냄
+                OnSoundDestroy?.Invoke(dyingBox);
                 
-                // Do NOT write to destination (Box destroyed)
-                // The destination (trap) remains as is.
+                // 함정 자리에 덮어쓰지 않음 (상자 소멸)
             }
             else {
-                // Normal move
                 maps[dest.x, dest.y, layer] = chainData[i];
             }
         }
 
-        // Clear start position
         maps[startX, startY, layer] = -1;
 
         return true;
     }
 
-    // --- Utilities ---
+    // --- 유틸리티 ---
     void CheckFoot() {
         int myLayerData = maps[PlayerIndex.x, PlayerIndex.y, PLAYER_LAYER];
         CheckLayerEvent(myLayerData);

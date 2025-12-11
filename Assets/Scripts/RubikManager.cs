@@ -52,7 +52,7 @@ public class RubikManager : MonoBehaviour
     public UIManager uiManager;
     public TileData[] tilePalette;
     
-    public TextAsset[] stageFiles; // 스테이지 JSON 파일들
+    public TextAsset[] stageFiles; 
     public int currentStageIndex = 0; 
     
     public GameObject prefabPlayer;
@@ -63,7 +63,10 @@ public class RubikManager : MonoBehaviour
     public int maxShiftCount = 10; 
     private int _currentShifts;
 
-    // 뒤로가기 스택
+    [Header("애니메이션 설정")]
+    public float moveDuration = 0.2f; 
+    private bool isAnimating = false; 
+
     private Stack<GameState> undoStack = new Stack<GameState>();
 
     private GameObject[,] objMap;
@@ -74,51 +77,36 @@ public class RubikManager : MonoBehaviour
 
     [Header("오디오 시스템")]
     public AudioSource audioSource; 
+    public AudioSource bgmSource;   
+    public AudioClip bgmClip;
 
-    [Header("기본 사운드 (타일에 전용 소리가 없을 때 사용)")]
-    public AudioClip defaultWalk;    // 기본 걷는 소리
-    public AudioClip defaultPush;    // 기본 미는 소리
-    public AudioClip defaultDestroy; // 기본 파괴 소리
+    [Header("기본 사운드")]
+    public AudioClip defaultWalk;    
+    public AudioClip defaultPush;    
+    public AudioClip defaultDestroy; 
 
     [Header("게임 상태 사운드")]
-    public AudioClip clipFail;       // 실패 소리
-    public AudioClip clipClear;      // 스테이지 클리어 소리
-    public AudioClip clipAllClear;   // (선택) 엔딩 BGM 또는 효과음
-    public AudioClip clipShift;
-    
-    public AudioSource bgmSource;
-    [Header("배경음악")]
-    public AudioClip bgmClip;
+    public AudioClip clipFail;       
+    public AudioClip clipClear;      
+    public AudioClip clipAllClear;   
+    public AudioClip clipShift;      
+
     void Start() {
         if (gridSystem == null) gridSystem = GetComponent<GridSystem>();
         
-        // 1. 비주얼 업데이트 이벤트 연결
         gridSystem.OnMapChanged += UpdateView;
         gridSystem.OnPlayerMoved += UpdatePlayerVis;
-        
-        // 2. 게임 상태 이벤트 연결
         gridSystem.OnTrapTriggered += ProcessFail; 
         gridSystem.OnGoalTriggered += () => StartCoroutine(ProcessClear());
 
-        // 3. 오디오 이벤트 연결 (데이터 기반)
-        // GridSystem에서 넘어온 TileData를 보고 소리를 결정합니다.
         gridSystem.OnSoundWalk += (tile) => PlayTileSound(tile, SoundType.Walk);
         gridSystem.OnSoundPush += (tile) => PlayTileSound(tile, SoundType.Push);
         gridSystem.OnSoundDestroy += (tile) => PlayTileSound(tile, SoundType.Destroy);
-        gridSystem.OnSoundShift += () => PlaySFX(clipShift);
-
+        
         InitializeGame();
         PlayBGM();
     }
-    void PlayBGM()
-    {
-        if (bgmSource != null && bgmClip != null)
-        {
-            bgmSource.clip = bgmClip;
-            bgmSource.loop = true;       // ★ 핵심: 무한 반복 설정
-            bgmSource.Play();            // 재생 시작
-        }
-    }
+
     void Update() {
         if (tileSizeXZ != _lastSizeXZ || tileHeight != _lastHeight) {
             SyncVisuals(); _lastSizeXZ = tileSizeXZ; _lastHeight = tileHeight;
@@ -128,6 +116,7 @@ public class RubikManager : MonoBehaviour
     void InitializeGame() {
         StopAllCoroutines(); 
         isGameEnding = false;
+        isAnimating = false;
         
         undoStack.Clear();
 
@@ -155,7 +144,6 @@ public class RubikManager : MonoBehaviour
     {
         AudioClip clipToPlay = null;
 
-        // 1. 타일 데이터에 전용 소리가 있는지 확인
         if (tile != null)
         {
             switch (type)
@@ -166,7 +154,6 @@ public class RubikManager : MonoBehaviour
             }
         }
 
-        // 2. 없으면 매니저의 기본(Default) 소리 사용
         if (clipToPlay == null)
         {
             switch (type)
@@ -177,7 +164,6 @@ public class RubikManager : MonoBehaviour
             }
         }
 
-        // 3. 최종 재생
         PlaySFX(clipToPlay);
     }
 
@@ -185,8 +171,18 @@ public class RubikManager : MonoBehaviour
     {
         if (clip != null && audioSource != null)
         {
-            audioSource.pitch = UnityEngine.Random.Range(0.9f, 1.1f); // 약간의 변화
+            audioSource.pitch = UnityEngine.Random.Range(0.9f, 1.1f);
             audioSource.PlayOneShot(clip);
+        }
+    }
+
+    void PlayBGM()
+    {
+        if (bgmSource != null && bgmClip != null)
+        {
+            bgmSource.clip = bgmClip;
+            bgmSource.loop = true;
+            bgmSource.Play();
         }
     }
 
@@ -194,32 +190,34 @@ public class RubikManager : MonoBehaviour
 
     void ProcessFail() 
     { 
-        isGameEnding = true;   
-        uiManager?.ShowFail(); 
-        PlaySFX(clipFail);
-        Debug.Log("실패! 리셋하거나 뒤로가기를 누르세요.");
+        if(!isGameEnding) {
+            isGameEnding = true;   
+            uiManager?.ShowFail(); 
+            PlaySFX(clipFail);
+        }
     }
     
     IEnumerator ProcessClear() 
     { 
-        isGameEnding = true; 
-        PlaySFX(clipClear);
-        uiManager?.ShowClear(); 
-        
-        yield return new WaitForSeconds(1.5f); 
-        
-        currentStageIndex++; // 다음 스테이지로
+        if(!isGameEnding) {
+            isGameEnding = true; 
+            PlaySFX(clipClear);
+            uiManager?.ShowClear(); 
+            
+            yield return new WaitForSeconds(1.5f); 
+            
+            currentStageIndex++; 
 
-        // ★ [엔딩 체크] 더 이상 로드할 파일이 없으면 엔딩
-        if (currentStageIndex >= stageFiles.Length) 
-        {
-            Debug.Log("모든 스테이지 클리어! 축하합니다!");
-            if(clipAllClear != null) PlaySFX(clipAllClear);
-            uiManager?.ShowAllClear(); // 엔딩 UI 띄우기
-        }
-        else 
-        {
-            InitializeGame(); // 다음 스테이지 시작
+            if (currentStageIndex >= stageFiles.Length) 
+            {
+                Debug.Log("모든 스테이지 클리어! 축하합니다!");
+                if(clipAllClear != null) PlaySFX(clipAllClear);
+                uiManager?.ShowAllClear();
+            }
+            else 
+            {
+                InitializeGame();
+            }
         }
     }
 
@@ -236,7 +234,7 @@ public class RubikManager : MonoBehaviour
 
     public void OnClickUndo()
     {
-        if (undoStack.Count == 0) return;
+        if (isAnimating || undoStack.Count == 0) return;
 
         GameState lastState = undoStack.Pop();
         _currentShifts = lastState.remainingShifts;
@@ -244,7 +242,6 @@ public class RubikManager : MonoBehaviour
 
         if (objPlayer != null) objPlayer.transform.rotation = lastState.playerRot;
 
-        // 상태 복구 시 게임 오버 해제
         isGameEnding = false;
         if (uiManager != null) uiManager.HideAll();
 
@@ -259,7 +256,7 @@ public class RubikManager : MonoBehaviour
     }
 
     public void TryMovePlayer(int dx, int dy) { 
-        if(!isGameEnding) { 
+        if(!isGameEnding && !isAnimating) { 
             SaveState(); 
             Quaternion beforeRot = objPlayer != null ? objPlayer.transform.rotation : Quaternion.identity;
             RotatePlayer(dx, dy); 
@@ -269,47 +266,189 @@ public class RubikManager : MonoBehaviour
 
             if (!isMoved && beforeRot == afterRot)
             {
-                undoStack.Pop(); // 이동도 안 하고 회전도 안 했으면 저장 취소
-            }
-        } 
-    }
-
-    public void TryPushRow(int dir) 
-    { 
-        if (!isGameEnding && _currentShifts > 0) 
-        {
-            SaveState(); 
-            if (gridSystem.TryPushRow(dir)) 
-            {
-                UseShiftChance();
-            }
-            else
-            {
                 undoStack.Pop(); 
             }
         } 
     }
 
-    public void TryPushCol(int dir) 
+    // --- [맵 회전 입력 및 애니메이션] ---
+
+    public void TryPushRow(int dir) 
     { 
-        if (!isGameEnding && _currentShifts > 0) 
-        { 
-            SaveState();
-            if (gridSystem.TryPushCol(dir)) 
-            {
-                UseShiftChance();
-            }
-            else
-            {
-                undoStack.Pop();
-            }
+        if (isAnimating || isGameEnding || _currentShifts <= 0) return;
+        
+        SaveState(); 
+        isAnimating = true; 
+        
+        Vector2Int oldPlayerPos = gridSystem.PlayerIndex;
+        bool success = gridSystem.TryPushRow(dir); 
+
+        if (success)
+        {
+            PlaySFX(clipShift);
+            bool playerActuallyMoved = (gridSystem.PlayerIndex != oldPlayerPos);
+            StartCoroutine(AnimateRow(oldPlayerPos.y, dir, playerActuallyMoved));
+        }
+        else
+        {
+            isAnimating = false;
+            undoStack.Pop();
         }
     }
 
+    public void TryPushCol(int dir) 
+    { 
+        if (isAnimating || isGameEnding || _currentShifts <= 0) return;
+        
+        SaveState();
+        isAnimating = true;
+
+        Vector2Int oldPlayerPos = gridSystem.PlayerIndex;
+        bool success = gridSystem.TryPushCol(dir);
+
+        if (success)
+        {
+            PlaySFX(clipShift);
+            bool playerActuallyMoved = (gridSystem.PlayerIndex != oldPlayerPos);
+            StartCoroutine(AnimateCol(oldPlayerPos.x, dir, playerActuallyMoved));
+        }
+        else
+        {
+            isAnimating = false;
+            undoStack.Pop();
+        }
+    }
+    
+    int PlayerIndexX() => gridSystem.PlayerIndex.x;
+    int PlayerIndexY() => gridSystem.PlayerIndex.y;
+
+    IEnumerator AnimateRow(int y, int dir, bool movePlayer)
+    {
+        int visualDir = -dir; 
+
+        List<Transform> movingObjs = new List<Transform>();
+        for (int x = 0; x < width; x++)
+        {
+            if (objMap[x, y] != null) movingObjs.Add(objMap[x, y].transform);
+        }
+        
+        if (movePlayer && objPlayer != null)
+        {
+            movingObjs.Add(objPlayer.transform);
+        }
+
+        GameObject ghostObj = null;
+        int wrapIndex = (visualDir == 1) ? width - 1 : 0; 
+        
+        if (objMap[wrapIndex, y] != null)
+        {
+            ghostObj = Instantiate(objMap[wrapIndex, y]); 
+            float startX = (visualDir == 1) ? -1 : width;
+            float oX = width / 2f - 0.5f;
+            float oZ = height / 2f - 0.5f;
+            ghostObj.transform.position = new Vector3(startX - oX, 0, y - oZ); 
+            movingObjs.Add(ghostObj.transform);
+        }
+
+        float elapsed = 0f;
+        Dictionary<Transform, Vector3> startPositions = new Dictionary<Transform, Vector3>();
+        Dictionary<Transform, Vector3> endPositions = new Dictionary<Transform, Vector3>();
+
+        foreach (var t in movingObjs)
+        {
+            startPositions[t] = t.position;
+            endPositions[t] = t.position + new Vector3(visualDir * tileSizeXZ, 0, 0); 
+        }
+
+        while (elapsed < moveDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / moveDuration;
+            t = t * t * (3f - 2f * t); 
+
+            foreach (var tr in movingObjs)
+            {
+                if (tr != null)
+                    tr.position = Vector3.Lerp(startPositions[tr], endPositions[tr], t);
+            }
+            yield return null;
+        }
+
+        if (ghostObj != null) Destroy(ghostObj);
+
+        UseShiftChance(); // ★ 여기가 에러 나던 곳 -> 아래 함수 추가로 해결
+        isAnimating = false;
+        
+        UpdateView(); 
+        UpdatePlayerVis();
+    }
+
+    IEnumerator AnimateCol(int x, int dir, bool movePlayer)
+    {
+        int visualDir = -dir;
+
+        List<Transform> movingObjs = new List<Transform>();
+        for (int y = 0; y < height; y++)
+        {
+            if (objMap[x, y] != null) movingObjs.Add(objMap[x, y].transform);
+        }
+
+        if (movePlayer && objPlayer != null)
+            movingObjs.Add(objPlayer.transform);
+
+        GameObject ghostObj = null;
+        int wrapIndex = (visualDir == 1) ? height - 1 : 0; 
+
+        if (objMap[x, wrapIndex] != null)
+        {
+            ghostObj = Instantiate(objMap[x, wrapIndex]);
+            float startY = (visualDir == 1) ? -1 : height;
+            float oX = width / 2f - 0.5f;
+            float oZ = height / 2f - 0.5f;
+            ghostObj.transform.position = new Vector3(x - oX, 0, startY - oZ);
+            movingObjs.Add(ghostObj.transform);
+        }
+
+        float elapsed = 0f;
+        Dictionary<Transform, Vector3> startPos = new Dictionary<Transform, Vector3>();
+        Dictionary<Transform, Vector3> endPos = new Dictionary<Transform, Vector3>();
+
+        foreach (var t in movingObjs)
+        {
+            startPos[t] = t.position;
+            endPos[t] = t.position + new Vector3(0, 0, visualDir * tileSizeXZ); 
+        }
+
+        while (elapsed < moveDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / moveDuration;
+            t = t * t * (3f - 2f * t);
+
+            foreach (var tr in movingObjs)
+            {
+                if (tr != null)
+                    tr.position = Vector3.Lerp(startPos[tr], endPos[tr], t);
+            }
+            yield return null;
+        }
+
+        if (ghostObj != null) Destroy(ghostObj);
+
+        UseShiftChance(); // ★ 여기가 에러 나던 곳 -> 아래 함수 추가로 해결
+        isAnimating = false;
+        
+        UpdateView(); 
+        UpdatePlayerVis();
+    }
+
+    // ★ [추가된 함수] 누락되었던 횟수 차감 및 UI 갱신 함수
     void UseShiftChance()
     {
         _currentShifts--;
-        if (uiManager != null) uiManager.UpdateShiftText(_currentShifts, maxShiftCount);
+        if (uiManager != null) 
+            uiManager.UpdateShiftText(_currentShifts, maxShiftCount);
+        Debug.Log($"회전 성공! 남은 횟수: {_currentShifts}");
     }
 
     // --- [맵 로딩 및 시각화] ---
@@ -317,7 +456,7 @@ public class RubikManager : MonoBehaviour
     void LoadStage()
     {
         if (stageFiles == null || stageFiles.Length == 0) return;
-        if (currentStageIndex >= stageFiles.Length) return; // 안전장치
+        if (currentStageIndex >= stageFiles.Length) return; 
         
         string jsonText = stageFiles[currentStageIndex].text;
         
@@ -369,6 +508,8 @@ public class RubikManager : MonoBehaviour
 
     void UpdateView()
     {
+        if (isAnimating) return; 
+
         ClearMapVisuals();
         float oX = width/2f - 0.5f, oZ = height/2f - 0.5f;
 
@@ -444,22 +585,15 @@ public class RubikManager : MonoBehaviour
     TileData GetTileData(int id) { foreach(var d in tilePalette) if(d.tileID == id) return d; return null; }
     
     void ClearMapVisuals() { 
-        // 삭제할 대상을 담을 리스트
         List<GameObject> objectsToDestroy = new List<GameObject>();
 
         foreach(Transform child in transform) {
-            // 1. 플레이어 보호 (objPlayer가 null이 아닐 때만 체크)
             if (objPlayer != null && child == objPlayer.transform) continue;
-
-            // 2. 오디오 오브젝트 보호 (이름으로 체크)
-            // ★ 방금 만든 오디오 오브젝트들이 지워지면 안 되니까 건너뜁니다.
             if (child.name == "Audio_BGM" || child.name == "Audio_SFX") continue;
 
-            // 3. 나머지는 맵 타일이므로 삭제 리스트에 추가
             objectsToDestroy.Add(child.gameObject);
         }
 
-        // 리스트에 담긴 것들만 안전하게 삭제
         foreach(GameObject go in objectsToDestroy) {
             Destroy(go);
         }
