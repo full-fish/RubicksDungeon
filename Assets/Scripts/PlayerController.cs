@@ -1,18 +1,20 @@
 using UnityEngine;
-using UnityEngine.InputSystem;
+using UnityEngine.InputSystem; // ★ 필수
 
 public class PlayerController : MonoBehaviour
 {
-    // ★ RubikManager -> GameManager로 변경됨
     private GameManager _manager;
 
     [Header("입력 민감도 설정")]
     public float initialDelay = 0.3f; 
     public float repeatRate = 0.1f;
-
     private float _nextInputTime = 0f; 
 
-    // ★ 초기화 함수도 GameManager를 받도록 수정
+    [Header("모바일 스와이프 설정")]
+    public float minSwipeDistance = 50f; 
+    private Vector2 _touchStartPos;
+    private bool _isSwiping = false;
+
     public void Init(GameManager manager)
     {
         _manager = manager;
@@ -20,48 +22,89 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
-        if (_manager == null || Keyboard.current == null) return;
+        if (_manager == null) return;
 
-        HandleInput();
+        // 1. 키보드 입력
+        if (Keyboard.current != null)
+        {
+            HandleKeyboardInput();
+        }
+
+        // 2. 포인터(마우스/터치) 스와이프 입력
+        if (Pointer.current != null)
+        {
+            HandleSwipeInput();
+        }
     }
 
-    void HandleInput()
+    // --- [PC] 키보드 입력 처리 ---
+    void HandleKeyboardInput()
     {
-        // 1. 이동 입력 (화살표)
         if (CheckKey(Key.RightArrow))      _manager.TryMovePlayer(1, 0);
         else if (CheckKey(Key.LeftArrow))  _manager.TryMovePlayer(-1, 0);
         else if (CheckKey(Key.UpArrow))    _manager.TryMovePlayer(0, 1);
         else if (CheckKey(Key.DownArrow))  _manager.TryMovePlayer(0, -1);
 
-        // 2. 회전 입력 (WASD)
-        else if (CheckKey(Key.D)) _manager.TryPushRow(-1);
-        else if (CheckKey(Key.A)) _manager.TryPushRow(1);
-        else if (CheckKey(Key.S)) _manager.TryPushCol(1);
-        else if (CheckKey(Key.W)) _manager.TryPushCol(-1);
+        else if (Keyboard.current[Key.D].wasPressedThisFrame) _manager.TryPushRow(-1);
+        else if (Keyboard.current[Key.A].wasPressedThisFrame) _manager.TryPushRow(1);
+        else if (Keyboard.current[Key.S].wasPressedThisFrame) _manager.TryPushCol(1);
+        else if (Keyboard.current[Key.W].wasPressedThisFrame) _manager.TryPushCol(-1);
         
-        // 3. 기능 입력 (Undo / Reset)
         else if (Keyboard.current[Key.Z].wasPressedThisFrame) _manager.OnClickUndo();
         else if (Keyboard.current[Key.R].wasPressedThisFrame) _manager.OnClickReset();
+    }
+
+    // --- [Mobile/PC] New Input System 기반 스와이프 ---
+    void HandleSwipeInput()
+    {
+        // Pointer.current는 마우스와 터치를 모두 포함합니다.
+        
+        // 누르는 순간 (wasPressedThisFrame)
+        if (Pointer.current.press.wasPressedThisFrame)
+        {
+            _touchStartPos = Pointer.current.position.ReadValue();
+            _isSwiping = true;
+        }
+        // 떼는 순간 (wasReleasedThisFrame)
+        else if (Pointer.current.press.wasReleasedThisFrame && _isSwiping)
+        {
+            _isSwiping = false;
+            Vector2 touchEndPos = Pointer.current.position.ReadValue();
+            ProcessSwipe(_touchStartPos, touchEndPos);
+        }
+    }
+
+    void ProcessSwipe(Vector2 start, Vector2 end)
+    {
+        Vector2 swipeVector = end - start;
+
+        if (swipeVector.magnitude < minSwipeDistance) return;
+
+        if (Mathf.Abs(swipeVector.x) > Mathf.Abs(swipeVector.y))
+        {
+            if (swipeVector.x > 0) _manager.TryMovePlayer(1, 0); 
+            else                   _manager.TryMovePlayer(-1, 0); 
+        }
+        else
+        {
+            if (swipeVector.y > 0) _manager.TryMovePlayer(0, 1);  
+            else                   _manager.TryMovePlayer(0, -1); 
+        }
     }
 
     bool CheckKey(Key key)
     {
         var keyControl = Keyboard.current[key];
-
-        // 1. 방금 막 눌렀을 때
         if (keyControl.wasPressedThisFrame)
         {
             _nextInputTime = Time.time + initialDelay; 
             return true;
         }
-
-        // 2. 꾹 누르고 있을 때
         if (keyControl.isPressed && Time.time >= _nextInputTime)
         {
             _nextInputTime = Time.time + repeatRate; 
             return true;
         }
-
         return false;
     }
 }
