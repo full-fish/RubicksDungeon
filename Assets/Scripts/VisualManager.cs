@@ -70,7 +70,6 @@ public class VisualManager : MonoBehaviour
 
                 if (layer == 1) objMap[x, y] = go;
 
-                // ★ [추가] 오브젝트에 "나는 밀리는 놈인가?" 정보를 기록해둠
                 TileInfo info = go.AddComponent<TileInfo>();
                 info.isPush = d.isPush;
             }
@@ -85,7 +84,8 @@ public class VisualManager : MonoBehaviour
         
         if (objPlayer.GetComponent<PlayerController>() == null) {
             var pc = objPlayer.AddComponent<PlayerController>();
-            pc.Init(FindObjectOfType<GameManager>());
+            // ★ [수정] FindObjectOfType -> FindFirstObjectByType (경고 해결)
+            pc.Init(FindFirstObjectByType<GameManager>());
         }
     }
 
@@ -106,16 +106,18 @@ public class VisualManager : MonoBehaviour
         Transform boxT = null;
         Vector3 bStart = Vector3.zero, bEnd = Vector3.zero;
 
-        // ★ [수정] GridSystem 데이터가 아니라, 화면에 있는 오브젝트의 정보를 직접 확인
+        // ★ [수정] GridData(이미 변함) 대신 VisualObject(아직 안 변함)를 확인
         if (IsBoxAt(targetPos)) 
         {
-            GameObject boxObj = objMap[targetPos.x, targetPos.y];
-            TileInfo info = boxObj.GetComponent<TileInfo>();
+            GameObject targetObj = objMap[targetPos.x, targetPos.y];
+            
+            // 오브젝트에 붙어있는 "정보표(TileInfo)"를 확인
+            TileInfo info = targetObj.GetComponent<TileInfo>();
 
-            // "화면에 있고" AND "밀 수 있는 놈(isPush=true)"이면 애니메이션 적용
+            // "화면에 있고" AND "밀 수 있는 속성(isPush)"이라면 -> 박스 애니메이션 대상!
             if (info != null && info.isPush)
             {
-                boxT = boxObj.transform;
+                boxT = targetObj.transform;
                 bStart = boxT.position;
                 bEnd = bStart + new Vector3(dx * tileSizeXZ, 0, dy * tileSizeXZ);
             }
@@ -126,10 +128,13 @@ public class VisualManager : MonoBehaviour
             elapsed += Time.deltaTime;
             float t = elapsed / moveDuration;
             t = t * t * (3f - 2f * t);
+            
             if (objPlayer) objPlayer.transform.position = Vector3.Lerp(pStart, pEnd, t);
             if (boxT) boxT.position = Vector3.Lerp(bStart, bEnd, t);
+            
             yield return null;
         }
+        
         if (objPlayer) objPlayer.transform.position = pEnd;
         if (boxT) boxT.position = bEnd;
 
@@ -242,7 +247,6 @@ public class VisualManager : MonoBehaviour
     }
 }
 
-// ★ [추가] 타일 정보를 저장하는 간단한 클래스
 public class TileInfo : MonoBehaviour 
 {
     public bool isPush; 

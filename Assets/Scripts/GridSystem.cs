@@ -17,7 +17,7 @@ public class GridSystem : MonoBehaviour
     public Action OnTrapTriggered;
     public Action OnGoalTriggered;
     
-    // 오디오 신호 (매니저에게 전달)
+    // 오디오 신호
     public Action<TileData> OnSoundWalk;    
     public Action<TileData> OnSoundPush;    
     public Action<TileData> OnSoundDestroy; 
@@ -31,7 +31,6 @@ public class GridSystem : MonoBehaviour
         PlayerIndex = startPos;
         maps = loadedMaps; 
 
-        // 데이터 패킹 (랜덤 변형값 포함)
         for (int l = 0; l < 3; l++) {
             for (int x = 0; x < w; x++) {
                 for (int y = 0; y < h; y++) {
@@ -73,7 +72,7 @@ public class GridSystem : MonoBehaviour
         int layer = 1;
         TileData nextObj = GetTileDataFromPacked(maps[nextX, nextY, layer]);
 
-        // 1. 밀기 시도
+        // 1. 밀기 시도 (상자가 있을 때)
         if (nextObj != null && nextObj.isPush) {
             int pushX = nextX + dx;
             int pushY = nextY + dy;
@@ -83,7 +82,14 @@ public class GridSystem : MonoBehaviour
             TileData destObj = GetTileDataFromPacked(maps[pushX, pushY, layer]);
             TileData destFloor = GetTileDataFromPacked(maps[pushX, pushY, 0]);
 
-            bool isDestPassable = (destObj == null) || (!destObj.isStop);
+            // --- [수정된 부분] 보물상자(isGoal) 체크 추가 ---
+            bool isDestPassable = false;
+
+            if (destObj == null) isDestPassable = true;      // 빈 공간 OK
+            else if (destObj.isDead) isDestPassable = true;  // 함정 OK (상자 파괴됨)
+            else if (destObj.isGoal) isDestPassable = false; // ★ 보물상자 NO (못 밈)
+            else if (!destObj.isStop) isDestPassable = true; // 기타 통과 가능 OK
+
             bool isFloorPassable = (destFloor == null) || (!destFloor.isStop);
 
             if (isDestPassable && isFloorPassable) {
@@ -100,11 +106,12 @@ public class GridSystem : MonoBehaviour
                     OnSoundPush?.Invoke(boxToPush); 
                 }
                 OnMapChanged?.Invoke();
+                // ★ 여기서 return 하지 않고 아래로 흘려보내서 플레이어도 이동시킴
             } else {
-                return false; // 밀기 실패
+                return false; // 밀기 실패 (막힘)
             }
         }
-        // 2. 벽 체크
+        // 2. 벽 체크 (밀기가 아닌 경우)
         else if (IsStopAt(nextX, nextY)) {
             return false;
         }
@@ -114,10 +121,12 @@ public class GridSystem : MonoBehaviour
             OnSoundWalk?.Invoke(floor); 
         }
 
+        // 4. 플레이어 위치 갱신 (공통)
         PlayerIndex = new Vector2Int(nextX, nextY);
         OnPlayerMoved?.Invoke();
         CheckFoot();
-        return true;
+        
+        return true; // ★ 모든 경로 끝에 return true 보장
     }
 
     private bool IsStopAt(int x, int y) {
