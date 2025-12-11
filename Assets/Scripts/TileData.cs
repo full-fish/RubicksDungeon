@@ -13,6 +13,10 @@ public class TileData : ScriptableObject
 {
     public int tileID;
 
+    [Header("사운드 설정")]
+    public AudioClip clipPush;    // 이 물체가 밀릴 때 소리
+    public AudioClip clipDestroy; // 이 물체가 파괴될 때 소리
+    public AudioClip clipStep;    // (선택) 이 위를 걸을 때 소리
     [Header("비주얼 설정")]
     public VisualVariant[] variants; 
 

@@ -36,15 +36,15 @@ public class GameState
     public Vector2Int playerPos;
     public int remainingShifts;
     public Quaternion playerRot;
-public GameState(int[,,] map, Vector2Int pos, int shifts, Quaternion rot) 
+
+    public GameState(int[,,] map, Vector2Int pos, int shifts, Quaternion rot) 
     {
         this.mapData = map;
         this.playerPos = pos;
         this.remainingShifts = shifts;
-        this.playerRot = rot; // 회전값 초기화
+        this.playerRot = rot; 
     }
 }
-// ------------------------
 
 public class RubikManager : MonoBehaviour
 {
@@ -52,7 +52,7 @@ public class RubikManager : MonoBehaviour
     public UIManager uiManager;
     public TileData[] tilePalette;
     
-    public TextAsset[] stageFiles; // Stage Files
+    public TextAsset[] stageFiles; // 스테이지 JSON 파일들
     public int currentStageIndex = 0; 
     
     public GameObject prefabPlayer;
@@ -72,18 +72,53 @@ public class RubikManager : MonoBehaviour
     private float _lastSizeXZ, _lastHeight;
     private int width, height;
 
+    [Header("오디오 시스템")]
+    public AudioSource audioSource; 
+
+    [Header("기본 사운드 (타일에 전용 소리가 없을 때 사용)")]
+    public AudioClip defaultWalk;    // 기본 걷는 소리
+    public AudioClip defaultPush;    // 기본 미는 소리
+    public AudioClip defaultDestroy; // 기본 파괴 소리
+
+    [Header("게임 상태 사운드")]
+    public AudioClip clipFail;       // 실패 소리
+    public AudioClip clipClear;      // 스테이지 클리어 소리
+    public AudioClip clipAllClear;   // (선택) 엔딩 BGM 또는 효과음
+    public AudioClip clipShift;
+    
+    public AudioSource bgmSource;
+    [Header("배경음악")]
+    public AudioClip bgmClip;
     void Start() {
         if (gridSystem == null) gridSystem = GetComponent<GridSystem>();
+        
+        // 1. 비주얼 업데이트 이벤트 연결
         gridSystem.OnMapChanged += UpdateView;
         gridSystem.OnPlayerMoved += UpdatePlayerVis;
         
-        // ★ [수정] 코루틴(StartCoroutine)이 아니라 그냥 함수 호출로 변경
+        // 2. 게임 상태 이벤트 연결
         gridSystem.OnTrapTriggered += ProcessFail; 
-        
         gridSystem.OnGoalTriggered += () => StartCoroutine(ProcessClear());
-        InitializeGame();
-    }
 
+        // 3. 오디오 이벤트 연결 (데이터 기반)
+        // GridSystem에서 넘어온 TileData를 보고 소리를 결정합니다.
+        gridSystem.OnSoundWalk += (tile) => PlayTileSound(tile, SoundType.Walk);
+        gridSystem.OnSoundPush += (tile) => PlayTileSound(tile, SoundType.Push);
+        gridSystem.OnSoundDestroy += (tile) => PlayTileSound(tile, SoundType.Destroy);
+        gridSystem.OnSoundShift += () => PlaySFX(clipShift);
+
+        InitializeGame();
+        PlayBGM();
+    }
+    void PlayBGM()
+    {
+        if (bgmSource != null && bgmClip != null)
+        {
+            bgmSource.clip = bgmClip;
+            bgmSource.loop = true;       // ★ 핵심: 무한 반복 설정
+            bgmSource.Play();            // 재생 시작
+        }
+    }
     void Update() {
         if (tileSizeXZ != _lastSizeXZ || tileHeight != _lastHeight) {
             SyncVisuals(); _lastSizeXZ = tileSizeXZ; _lastHeight = tileHeight;
@@ -91,9 +126,9 @@ public class RubikManager : MonoBehaviour
     }
 
     void InitializeGame() {
-        StopAllCoroutines(); isGameEnding = false;
+        StopAllCoroutines(); 
+        isGameEnding = false;
         
-        // 스택 초기화
         undoStack.Clear();
 
         if (uiManager != null) uiManager.HideAll();
@@ -104,97 +139,138 @@ public class RubikManager : MonoBehaviour
         _currentShifts = maxShiftCount;
         if (uiManager != null) 
             uiManager.UpdateShiftText(_currentShifts, maxShiftCount);
-        Debug.Log($"스테이지 시작! 남은 회전 횟수: {_currentShifts}");
+        
+        Debug.Log($"스테이지 {currentStageIndex + 1} 시작! 남은 회전 횟수: {_currentShifts}");
 
-        UpdateView(); UpdatePlayerVis(); AutoAdjustCamera();
+        UpdateView(); 
+        UpdatePlayerVis(); 
+        AutoAdjustCamera();
     }
 
-    // ★ [Undo] 상태 저장 함수
-void SaveState()
+    // --- [오디오 시스템] ---
+    
+    private enum SoundType { Walk, Push, Destroy }
+
+    void PlayTileSound(TileData tile, SoundType type)
+    {
+        AudioClip clipToPlay = null;
+
+        // 1. 타일 데이터에 전용 소리가 있는지 확인
+        if (tile != null)
+        {
+            switch (type)
+            {
+                case SoundType.Walk: clipToPlay = tile.clipStep; break;
+                case SoundType.Push: clipToPlay = tile.clipPush; break;
+                case SoundType.Destroy: clipToPlay = tile.clipDestroy; break;
+            }
+        }
+
+        // 2. 없으면 매니저의 기본(Default) 소리 사용
+        if (clipToPlay == null)
+        {
+            switch (type)
+            {
+                case SoundType.Walk: clipToPlay = defaultWalk; break;
+                case SoundType.Push: clipToPlay = defaultPush; break;
+                case SoundType.Destroy: clipToPlay = defaultDestroy; break;
+            }
+        }
+
+        // 3. 최종 재생
+        PlaySFX(clipToPlay);
+    }
+
+    public void PlaySFX(AudioClip clip)
+    {
+        if (clip != null && audioSource != null)
+        {
+            audioSource.pitch = UnityEngine.Random.Range(0.9f, 1.1f); // 약간의 변화
+            audioSource.PlayOneShot(clip);
+        }
+    }
+
+    // --- [게임 로직] ---
+
+    void ProcessFail() 
+    { 
+        isGameEnding = true;   
+        uiManager?.ShowFail(); 
+        PlaySFX(clipFail);
+        Debug.Log("실패! 리셋하거나 뒤로가기를 누르세요.");
+    }
+    
+    IEnumerator ProcessClear() 
+    { 
+        isGameEnding = true; 
+        PlaySFX(clipClear);
+        uiManager?.ShowClear(); 
+        
+        yield return new WaitForSeconds(1.5f); 
+        
+        currentStageIndex++; // 다음 스테이지로
+
+        // ★ [엔딩 체크] 더 이상 로드할 파일이 없으면 엔딩
+        if (currentStageIndex >= stageFiles.Length) 
+        {
+            Debug.Log("모든 스테이지 클리어! 축하합니다!");
+            if(clipAllClear != null) PlaySFX(clipAllClear);
+            uiManager?.ShowAllClear(); // 엔딩 UI 띄우기
+        }
+        else 
+        {
+            InitializeGame(); // 다음 스테이지 시작
+        }
+    }
+
+    // --- [입력 및 Undo] ---
+
+    void SaveState()
     {
         int[,,] currentMap = gridSystem.GetMapSnapshot();
         Vector2Int currentPos = gridSystem.PlayerIndex;
-        
-        // 현재 캐릭터의 회전값 가져오기 (없으면 기본값)
         Quaternion currentRot = objPlayer != null ? objPlayer.transform.rotation : Quaternion.identity;
 
         undoStack.Push(new GameState(currentMap, currentPos, _currentShifts, currentRot));
     }
 
-    // ★ [Undo] 뒤로가기 버튼 기능
     public void OnClickUndo()
     {
-        // ★ [수정] isGameEnding 체크 삭제! (실패 상태에서도 Undo 가능해야 함)
-        if (undoStack.Count == 0) 
-        {
-            Debug.Log("더 이상 뒤로 갈 수 없습니다.");
-            return;
-        }
+        if (undoStack.Count == 0) return;
 
-        // 1. 상태 복구
         GameState lastState = undoStack.Pop();
         _currentShifts = lastState.remainingShifts;
         gridSystem.RestoreMapData(lastState.mapData, lastState.playerPos);
 
-        // 2. 캐릭터 회전 복구
-        if (objPlayer != null) 
-        {
-            objPlayer.transform.rotation = lastState.playerRot;
-        }
+        if (objPlayer != null) objPlayer.transform.rotation = lastState.playerRot;
 
-        // ★ [추가] 죽었던 상태(isGameEnding)를 다시 '살아있음(false)'으로 변경
+        // 상태 복구 시 게임 오버 해제
         isGameEnding = false;
-
-        // ★ [추가] 화면에 떠있는 FAIL 텍스트 치우기
         if (uiManager != null) uiManager.HideAll();
 
-        // 3. 화면 갱신
         UpdateView(); 
         UpdatePlayerVis(); 
-        
-        // 4. UI 갱신
-        if (uiManager != null) 
-            uiManager.UpdateShiftText(_currentShifts, maxShiftCount);
-
-        Debug.Log($"실행 취소! 되살아났습니다.");
+        if (uiManager != null) uiManager.UpdateShiftText(_currentShifts, maxShiftCount);
     }
 
-    // ★ [Reset] 리셋 버튼 기능
     public void OnClickReset()
     {
-        Debug.Log("다시 시작");
         InitializeGame();
     }
 
-    // --- 입력 처리 (중복 없이 하나만 있어야 함!) ---
-public void TryMovePlayer(int dx, int dy) { 
+    public void TryMovePlayer(int dx, int dy) { 
         if(!isGameEnding) { 
-            // 1. 입력 전 상태 저장
             SaveState(); 
-            
-            // 2. 회전하기 전 각도 기억
             Quaternion beforeRot = objPlayer != null ? objPlayer.transform.rotation : Quaternion.identity;
-
-            // 3. 캐릭터 회전 적용
             RotatePlayer(dx, dy); 
-            
-            // 4. 회전한 후 각도 기억
             Quaternion afterRot = objPlayer != null ? objPlayer.transform.rotation : Quaternion.identity;
 
-            // 5. 이동 시도
             bool isMoved = gridSystem.TryMovePlayer(dx, dy);
 
-            if (!isMoved) 
+            if (!isMoved && beforeRot == afterRot)
             {
-                // ★ [핵심 로직] 이동은 실패(벽)했지만, 
-                // 바라보는 방향이 바뀌었다면(before != after) -> "유의미한 행동"으로 보고 저장 유지
-                // 방향도 그대로라면 -> "아무것도 안 한 것"이므로 저장 취소(Pop)
-                if (beforeRot == afterRot)
-                {
-                    undoStack.Pop(); 
-                }
+                undoStack.Pop(); // 이동도 안 하고 회전도 안 했으면 저장 취소
             }
-            // 이동 성공(isMoved == true)했다면 당연히 저장 유지
         } 
     }
 
@@ -202,48 +278,46 @@ public void TryMovePlayer(int dx, int dy) {
     { 
         if (!isGameEnding && _currentShifts > 0) 
         {
-            SaveState(); // 일단 저장
+            SaveState(); 
             if (gridSystem.TryPushRow(dir)) 
             {
                 UseShiftChance();
             }
             else
             {
-                undoStack.Pop(); // 실패하면 저장 취소
+                undoStack.Pop(); 
             }
         } 
-        else if (_currentShifts <= 0) Debug.Log("횟수 부족");
     }
 
     public void TryPushCol(int dir) 
     { 
         if (!isGameEnding && _currentShifts > 0) 
         { 
-            SaveState(); // 일단 저장
+            SaveState();
             if (gridSystem.TryPushCol(dir)) 
             {
                 UseShiftChance();
             }
             else
             {
-                undoStack.Pop(); // 실패하면 저장 취소
+                undoStack.Pop();
             }
         }
-        else if (_currentShifts <= 0) Debug.Log("횟수 부족");
     }
 
     void UseShiftChance()
     {
         _currentShifts--;
-        if (uiManager != null) 
-            uiManager.UpdateShiftText(_currentShifts, maxShiftCount);
-        Debug.Log($"회전 성공! 남은 횟수: {_currentShifts}");
+        if (uiManager != null) uiManager.UpdateShiftText(_currentShifts, maxShiftCount);
     }
 
-    // --- 맵 로드 및 렌더링 ---
+    // --- [맵 로딩 및 시각화] ---
+
     void LoadStage()
     {
         if (stageFiles == null || stageFiles.Length == 0) return;
+        if (currentStageIndex >= stageFiles.Length) return; // 안전장치
         
         string jsonText = stageFiles[currentStageIndex].text;
         
@@ -257,8 +331,6 @@ public void TryMovePlayer(int dx, int dy) {
         height = data.properties.height;
         maxShiftCount = data.properties.maxShifts;
         
-        Debug.Log($"로드된 스테이지: {data.properties.stageName}");
-
         int[,,] maps = new int[width, height, 3];
         Vector2Int startPos = new Vector2Int(width/2, height/2);
         objMap = new GameObject[width, height];
@@ -370,46 +442,26 @@ public void TryMovePlayer(int dx, int dy) {
     }
 
     TileData GetTileData(int id) { foreach(var d in tilePalette) if(d.tileID == id) return d; return null; }
-    void ClearMapVisuals() { 
-        if(objMap!=null) {
-            foreach(var o in transform) {
-                if ((UnityEngine.Object)o != objPlayer.transform && (UnityEngine.Object)o != transform) 
-                    Destroy(((Transform)o).gameObject);
-            }
-        }
-    }
-    // ★ [수정] IEnumerator -> void 변경
-    // 자동 초기화 로직을 삭제하여 플레이어가 버튼을 누를 때까지 대기
-    void ProcessFail() 
-    { 
-        isGameEnding = true;   // 이동 입력 막기
-        uiManager?.ShowFail(); // 실패 텍스트 띄우기
-        Debug.Log("실패! 리셋하거나 뒤로가기를 누르세요.");
-    }
     
-// 기존 ProcessClear 함수를 아래와 같이 수정하세요
-    IEnumerator ProcessClear() 
-    { 
-        isGameEnding = true; 
-        uiManager?.ShowClear(); // "Stage Clear!" 표시
-        
-        yield return new WaitForSeconds(1.5f); 
-        
-        currentStageIndex++; // 다음 스테이지 번호로 증가
+    void ClearMapVisuals() { 
+        // 삭제할 대상을 담을 리스트
+        List<GameObject> objectsToDestroy = new List<GameObject>();
 
-        // ★ [핵심] 다음 스테이지가 존재하는지 확인
-        if (currentStageIndex >= stageFiles.Length) 
-        {
-            // 더 이상 깰 스테이지가 없음 -> 엔딩 처리
-            Debug.Log("모든 스테이지 클리어! 축하합니다!");
-            uiManager?.ShowAllClear(); // 엔딩 화면 띄우기
-            
-            // 여기서 더 이상 InitializeGame()을 호출하지 않고 멈춤
+        foreach(Transform child in transform) {
+            // 1. 플레이어 보호 (objPlayer가 null이 아닐 때만 체크)
+            if (objPlayer != null && child == objPlayer.transform) continue;
+
+            // 2. 오디오 오브젝트 보호 (이름으로 체크)
+            // ★ 방금 만든 오디오 오브젝트들이 지워지면 안 되니까 건너뜁니다.
+            if (child.name == "Audio_BGM" || child.name == "Audio_SFX") continue;
+
+            // 3. 나머지는 맵 타일이므로 삭제 리스트에 추가
+            objectsToDestroy.Add(child.gameObject);
         }
-        else 
-        {
-            // 다음 스테이지가 있음 -> 게임 계속 진행
-            InitializeGame(); 
+
+        // 리스트에 담긴 것들만 안전하게 삭제
+        foreach(GameObject go in objectsToDestroy) {
+            Destroy(go);
         }
     }
     
