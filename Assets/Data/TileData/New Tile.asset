@@ -13,7 +13,11 @@ MonoBehaviour:
   m_Name: New Tile
   m_EditorClassIdentifier: Assembly-CSharp::TileData
   tileID: 0
-  variants: []
+  variants:
+  - prefab: {fileID: 919132149155446097, guid: 04aa4a5ded226ba4e8c2acee43dacfd7, type: 3}
+    overrideMat: {fileID: 0}
+    rotation: {x: 0, y: 0, z: 0}
+    chance: 0
   layerType: 0
   heightMultiplier: 1
   isStop: 0
@@ -21,5 +25,6 @@ MonoBehaviour:
   isShift: 0
   isDead: 0
   isGoal: 0
-  isFire: 0
-  isIce: 0
+  clipStep: {fileID: 0}
+  clipPush: {fileID: 0}
+  clipDestroy: {fileID: 0}

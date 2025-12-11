@@ -29,5 +29,6 @@ MonoBehaviour:
   isShift: 1
   isDead: 0
   isGoal: 0
-  isFire: 0
-  isIce: 0
+  clipStep: {fileID: 8300000, guid: 47d77728a478c7449ba848fbacc35027, type: 3}
+  clipPush: {fileID: 0}
+  clipDestroy: {fileID: 0}

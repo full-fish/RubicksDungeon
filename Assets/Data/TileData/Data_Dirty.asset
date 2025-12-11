@@ -19,11 +19,12 @@ MonoBehaviour:
     rotation: {x: 0, y: 0, z: 0}
     chance: 0
   layerType: 1
-  heightMultiplier: 0.4
+  heightMultiplier: 0.5
   isStop: 1
   isPush: 1
   isShift: 0
   isDead: 0
   isGoal: 0
-  isFire: 0
-  isIce: 0
+  clipStep: {fileID: 0}
+  clipPush: {fileID: 8300000, guid: 5b27cf1cb274f1d43a018aea10a8d250, type: 3}
+  clipDestroy: {fileID: 8300000, guid: 719b769bef16aa9449d959140bd736bd, type: 3}

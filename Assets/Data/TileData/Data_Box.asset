@@ -20,10 +20,11 @@ MonoBehaviour:
     chance: 100
   layerType: 1
   heightMultiplier: 1
-  isStop: 0
+  isStop: 1
   isPush: 1
   isShift: 1
   isDead: 0
   isGoal: 0
-  isFire: 0
-  isIce: 0
+  clipStep: {fileID: 0}
+  clipPush: {fileID: 8300000, guid: 708d81f9cf46393459399274c75baef9, type: 3}
+  clipDestroy: {fileID: 8300000, guid: 3ff91af2d9d05c04ca8e2fba1d730e4f, type: 3}
