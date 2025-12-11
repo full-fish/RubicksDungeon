@@ -387,12 +387,30 @@ public void TryMovePlayer(int dx, int dy) {
         Debug.Log("실패! 리셋하거나 뒤로가기를 누르세요.");
     }
     
-    IEnumerator ProcessClear() { 
-        isGameEnding=true; 
-        uiManager?.ShowClear(); 
+// 기존 ProcessClear 함수를 아래와 같이 수정하세요
+    IEnumerator ProcessClear() 
+    { 
+        isGameEnding = true; 
+        uiManager?.ShowClear(); // "Stage Clear!" 표시
+        
         yield return new WaitForSeconds(1.5f); 
-        currentStageIndex++; 
-        InitializeGame(); 
+        
+        currentStageIndex++; // 다음 스테이지 번호로 증가
+
+        // ★ [핵심] 다음 스테이지가 존재하는지 확인
+        if (currentStageIndex >= stageFiles.Length) 
+        {
+            // 더 이상 깰 스테이지가 없음 -> 엔딩 처리
+            Debug.Log("모든 스테이지 클리어! 축하합니다!");
+            uiManager?.ShowAllClear(); // 엔딩 화면 띄우기
+            
+            // 여기서 더 이상 InitializeGame()을 호출하지 않고 멈춤
+        }
+        else 
+        {
+            // 다음 스테이지가 있음 -> 게임 계속 진행
+            InitializeGame(); 
+        }
     }
     
     void AutoAdjustCamera() { 

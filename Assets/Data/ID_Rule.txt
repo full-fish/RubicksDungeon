@@ -17,10 +17,11 @@ ID 형식: CCCSSU (세 자리)
 
 [II. 속성 (Theme/Property)]
 x0x : 기본 (Normal) - 예: 100(기본 땅), 200(돌벽)
-x1x : 얼음 (Ice) - 미끄러짐
-x2x : 불/용암 (Fire) - 데미지/녹음
-x3x : 나무/자연 (Nature) - 불에 탐
-x4x : 금속 (Metal) - 무거움
+x1x : not_shift
+x2x : 얼음 (Ice) - 미끄러짐
+x3x : 불/용암 (Fire) - 데미지/녹음
+x4x : 나무/자연 (Nature) - 불에 탐
+x5x : 금속 (Metal) - 무거움
 
 --------------------------------------
 

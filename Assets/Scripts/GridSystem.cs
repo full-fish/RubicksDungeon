@@ -61,6 +61,8 @@ public class GridSystem : MonoBehaviour
     }
 
     // --- [1] 플레이어 이동 (직접 이동) ---
+    // --- [1] 플레이어 이동 (수정됨) ---
+// --- [1] 플레이어 이동 (수정됨) ---
     public bool TryMovePlayer(int dx, int dy)
     {
         int nextX = PlayerIndex.x + dx;
@@ -81,16 +83,35 @@ public class GridSystem : MonoBehaviour
             TileData destObj = GetTileDataFromPacked(maps[pushX, pushY, layer]);
             TileData destFloor = GetTileDataFromPacked(maps[pushX, pushY, 0]);
 
-            // 단순 밀기: 뒤가 비어있고 바닥이 막히지 않아야 함
-            // (Shift와 달리 직접 이동 밀기는 보통 하나만 밈, 필요시 Chain 적용 가능)
-            bool canPush = (destObj == null) && (destFloor == null || !destFloor.isStop);
+            // [수정 2] null 여부가 아니라, isStop 속성을 기준으로 판단
+            // 물체가 없거나(null), 있어도 지나갈 수 있어야(!isStop) 함
+            bool isDestPassable = (destObj == null) || (!destObj.isStop);
+            
+            // 바닥도 없거나(null), 있어도 막히지 않아야(!isStop) 함
+            bool isFloorPassable = (destFloor == null) || (!destFloor.isStop);
 
-            if (canPush) {
-                maps[pushX, pushY, layer] = maps[nextX, nextY, layer]; 
-                maps[nextX, nextY, layer] = 0; 
+            if (isDestPassable && isFloorPassable) {
+                // [함정 처리] 도착한 곳의 물체(destObj)가 함정(isDead)이라면?
+                // 혹은 도착한 바닥(destFloor)이 함정(isDead)이라면? (필요에 따라 추가)
+                bool isTrap = (destObj != null && destObj.isDead) || (destFloor != null && destFloor.isDead);
+
+                if (isTrap)
+                {
+                    // 함정이면 이동하지 않고 현재 위치의 박스를 '제거' (-1)
+                    maps[nextX, nextY, layer] = -1; 
+                }
+                else
+                {
+                    // 함정이 아니면 정상 이동
+                    maps[pushX, pushY, layer] = maps[nextX, nextY, layer]; 
+                    
+                    // [수정 1] 원래 있던 자리는 -1 (빈 공간)로 채움
+                    maps[nextX, nextY, layer] = -1; 
+                }
+
                 OnMapChanged?.Invoke();
             } else {
-                return false; // 밀기 실패 -> 이동 실패
+                return false; // 막혀서(isStop) 못 밈
             }
         }
         // 2. 벽 체크 (Push가 아니거나 Push 실패 후)
@@ -98,6 +119,7 @@ public class GridSystem : MonoBehaviour
             return false;
         }
 
+        // 3. 플레이어 이동 성공
         PlayerIndex = new Vector2Int(nextX, nextY);
         OnPlayerMoved?.Invoke();
         CheckFoot();
@@ -191,6 +213,7 @@ public class GridSystem : MonoBehaviour
 
     // 연쇄 밀기 로직
     // dir: 타일들이 이동해온 방향 (예: -1). 우리는 반대로(+1) 밀어야 함.
+    // 연쇄 밀기 로직 (수정됨: 함정 만나면 상자 소멸)
     bool TryPushChain(int startX, int startY, int dir, bool isRow, int layer) {
         int loopCount = isRow ? width : height;
         List<Vector2Int> chainCoords = new List<Vector2Int>();
@@ -199,58 +222,85 @@ public class GridSystem : MonoBehaviour
         int curX = startX;
         int curY = startY;
 
-        // 체인 탐색
+        bool hitTrap = false; // 함정을 만났는지 여부
+
+        // 1. 밀어야 할 체인 탐색
         for (int i = 0; i < loopCount; i++) {
             chainCoords.Add(new Vector2Int(curX, curY));
             chainData.Add(maps[curX, curY, layer]);
 
-            // 타일이 dir 방향으로 이동해 왔으므로, 밀어낼 방향은 -dir (반대)
-            // 예: dir이 -1(왼쪽)이면, 타일들이 왼쪽으로 쏠림 -> 나는 오른쪽(-(-1)=+1)으로 밀어야 함
+            // 다음 좌표 계산 (반대 방향으로 밀어야 함)
             int nextX = curX;
             int nextY = curY;
-            
-            // Wrapped Index 사용
             if (isRow) nextX = GetWrappedIndex(curX - dir, width);
             else       nextY = GetWrappedIndex(curY - dir, height);
 
             TileData nextTile = GetTileDataFromPacked(maps[nextX, nextY, layer]);
             TileData floorTile = GetTileDataFromPacked(maps[nextX, nextY, 0]);
 
+            // --- [판정 로직 수정] ---
+            
+            // A. 다음 칸이 비어있음 (-1 or 0)
             if (nextTile == null) {
-                // 빈 칸 발견! (끝)
-                if (floorTile != null && floorTile.isStop) return false; // 바닥이 구멍/벽이면 못 밈
+                // 바닥이 막힌 곳(isStop)인지 체크
+                if (floorTile != null && floorTile.isStop) return false; 
                 
+                // 바닥이 함정(isDead)이면 상자 소멸 처리
+                if (floorTile != null && floorTile.isDead) hitTrap = true;
+
                 chainCoords.Add(new Vector2Int(nextX, nextY));
-                break;
+                break; // 탐색 종료 (성공)
             }
+            // B. 다음 칸이 물체인데 '함정(isDead)'임 -> 여기서 상자 소멸하고 멈춤!
+            else if (nextTile.isDead) {
+                hitTrap = true; // 함정에 빠짐!
+                chainCoords.Add(new Vector2Int(nextX, nextY));
+                break; // 탐색 종료 (성공: 상자가 죽으면서 끝남)
+            }
+            // C. 다음 칸도 밀 수 있는 물체 (isPush) -> 계속 탐색
             else if (nextTile.isPush) {
-                // 또 밀 수 있는 물체 -> 계속 탐색 (Box -> Chest 등)
                 curX = nextX;
                 curY = nextY;
                 continue;
             }
+            // D. 벽(isStop) -> 못 밈 (전체 실패)
             else if (nextTile.isStop) {
-                // 벽 만남 -> 전체 체인 이동 불가
                 return false; 
             }
+            // E. 그 외 (통과 가능) -> 빈 칸 취급
             else {
-                // 그 외(통과 가능) -> 빈 칸 취급
                 chainCoords.Add(new Vector2Int(nextX, nextY));
                 break;
             }
         }
 
         // 맵이 꽉 차서 빈 곳을 못 찾음
-        if (chainCoords.Count == chainData.Count) return false;
+        if (!hitTrap && chainCoords.Count == chainData.Count) return false;
 
-        // 이동 실행 (뒤에서부터)
+        // 2. 실제 데이터 이동
+        // chainData[i]를 chainCoords[i+1]로 옮김
         for (int i = 0; i < chainData.Count; i++) {
             Vector2Int dest = chainCoords[i + 1];
-            maps[dest.x, dest.y, layer] = chainData[i];
+            
+            // ★ [핵심] 만약 이번이 체인의 마지막(가장 앞선 상자)이고, 함정에 빠진 상태라면?
+            if (hitTrap && i == chainData.Count - 1) {
+                // 상자를 목적지에 쓰지 않음 (함정은 그대로 두고 상자만 소멸)
+                // maps[dest.x, dest.y, layer] 값을 덮어쓰지 않음으로써 함정 유지
+                // 만약 바닥 함정 때문에 죽은거라면 그냥 빈칸(-1)이 됨
+                
+                // (선택) 만약 물체형 함정(가시 등)이 아니라 '구멍'이라서 
+                // 함정도 같이 메워져야 한다면 여기서 덮어씌우면 됩니다.
+                // 지금은 "상자가 사라져야 해"라고 하셨으므로 덮어쓰지 않습니다.
+            }
+            else {
+                // 평소대로 이동
+                maps[dest.x, dest.y, layer] = chainData[i];
+            }
         }
 
-        // 시작 지점 비우기
-        maps[startX, startY, layer] = 0;
+        // 시작 지점 비우기 (-1: 빈 공간)
+        maps[startX, startY, layer] = -1;
+
         return true;
     }
 
