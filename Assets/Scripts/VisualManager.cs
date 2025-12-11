@@ -30,6 +30,12 @@ public class VisualManager : MonoBehaviour
         AutoAdjustCamera();
     }
 
+    // ★ [추가] Undo 직전에 호출해서 화면 갱신을 잠시 막음
+    public void PrepareUndo() 
+    {
+        IsAnimating = true; 
+    }
+
     public void RefreshView()
     {
         if (IsAnimating) return;
@@ -76,6 +82,19 @@ public class VisualManager : MonoBehaviour
         }
     }
 
+    public void SyncCreatedObjects()
+    {
+        float oX = width/2f - 0.5f, oZ = height/2f - 0.5f;
+        for(int x=0; x<width; x++) {
+            for(int y=0; y<height; y++) {
+                if (_grid.GetLayerID(x,y,1) != 0 && objMap[x,y] == null) {
+                    Vector3 pos = new Vector3(x - oX, 0, y - oZ);
+                    CreateObj(_grid.GetLayerID(x,y,1), _grid.GetLayerVariant(x,y,1), pos, 1, x, y);
+                }
+            }
+        }
+    }
+
     public void UpdatePlayerVis()
     {
         if (IsAnimating || objPlayer == null) return;
@@ -84,7 +103,6 @@ public class VisualManager : MonoBehaviour
         
         if (objPlayer.GetComponent<PlayerController>() == null) {
             var pc = objPlayer.AddComponent<PlayerController>();
-            // ★ [수정] FindObjectOfType -> FindFirstObjectByType (경고 해결)
             pc.Init(FindFirstObjectByType<GameManager>());
         }
     }
@@ -96,6 +114,80 @@ public class VisualManager : MonoBehaviour
 
     // --- 애니메이션 루틴 ---
 
+    // ★ [수정] Undo 시 상자도 같이 당겨오는 로직 추가
+    // ★ [수정] Undo 이동 (상자 부활 및 이동 통합)
+    public IEnumerator AnimateUndoMove(Vector2Int currentVisualPos, int dx, int dy)
+    {
+        IsAnimating = true;
+        
+        // 1. 플레이어 이동 준비 (현재 위치 -> 과거 위치)
+        Vector3 pStart = GetWorldPos(currentVisualPos); 
+        Vector3 pEnd = GetWorldPos(currentVisualPos + new Vector2Int(dx, dy)); 
+        
+        // 2. 상자 처리 로직
+        // Undo 방향(dx,dy)의 반대편에 있는 상자를 당겨와야 함
+        Vector2Int visualBoxPos = currentVisualPos - new Vector2Int(dx, dy); // 화면상 상자 위치
+        Vector2Int finalBoxPos = currentVisualPos; // 상자가 도착할 위치 (플레이어가 서 있던 곳)
+        
+        Transform boxT = null;
+        Vector3 bStart = Vector3.zero, bEnd = Vector3.zero;
+
+        // A. 화면에 상자가 있는 경우 (일반적인 밀기 취소)
+        if (IsBoxAt(visualBoxPos))
+        {
+            GameObject boxObj = objMap[visualBoxPos.x, visualBoxPos.y];
+            TileInfo info = boxObj.GetComponent<TileInfo>();
+            
+            // 그게 밀 수 있는 상자라면 당겨옴
+            if(info != null && info.isPush)
+            {
+                boxT = boxObj.transform;
+                bStart = boxT.position;
+                bEnd = pStart; // 플레이어 위치로 당겨짐
+                
+                // 내부 배열 위치도 미리 이동시켜 둠 (중복 방지)
+                objMap[finalBoxPos.x, finalBoxPos.y] = boxObj;
+                objMap[visualBoxPos.x, visualBoxPos.y] = null;
+            }
+        }
+        // B. 화면에 상자가 없는 경우 (함정에 빠져서 파괴된 상자 부활)
+        else 
+        {
+            // 데이터상으로는 상자가 있어야 한다면? (RestoreMapData 덕분에 데이터는 있음)
+            int restoredId = _grid.GetLayerID(finalBoxPos.x, finalBoxPos.y, 1);
+            TileData restoredTile = _grid.GetTileDataFromPacked(restoredId);
+
+            if (restoredTile != null && restoredTile.isPush)
+            {
+                // 즉시 부활 (애니메이션 없이 뿅 나타남)
+                Vector3 spawnPos = pStart; // 플레이어 위치에 생성
+                CreateObj(restoredId, _grid.GetLayerVariant(finalBoxPos.x, finalBoxPos.y, 1), spawnPos, 1, finalBoxPos.x, finalBoxPos.y);
+                
+                // 부활한 상자를 boxT에 연결하면 '당겨오는' 연출도 가능하지만,
+                // 함정에서 나오는 건 뿅 생기는 게 자연스러우므로 여기선 생성만 함.
+            }
+        }
+
+        // 3. Lerp 애니메이션
+        float elapsed = 0f;
+        while (elapsed < moveDuration) {
+            elapsed += Time.deltaTime;
+            float t = elapsed / moveDuration;
+            t = t * t * (3f - 2f * t);
+            
+            if(objPlayer) objPlayer.transform.position = Vector3.Lerp(pStart, pEnd, t);
+            if(boxT) boxT.position = Vector3.Lerp(bStart, bEnd, t);
+            
+            yield return null;
+        }
+        
+        if(objPlayer) objPlayer.transform.position = pEnd;
+        if(boxT) boxT.position = bEnd;
+
+        IsAnimating = false;
+        RefreshView(); // 최종 정리
+    }
+
     public IEnumerator AnimateMoveRoutine(Vector2Int oldPos, int dx, int dy)
     {
         IsAnimating = true;
@@ -106,15 +198,10 @@ public class VisualManager : MonoBehaviour
         Transform boxT = null;
         Vector3 bStart = Vector3.zero, bEnd = Vector3.zero;
 
-        // ★ [수정] GridData(이미 변함) 대신 VisualObject(아직 안 변함)를 확인
         if (IsBoxAt(targetPos)) 
         {
             GameObject targetObj = objMap[targetPos.x, targetPos.y];
-            
-            // 오브젝트에 붙어있는 "정보표(TileInfo)"를 확인
             TileInfo info = targetObj.GetComponent<TileInfo>();
-
-            // "화면에 있고" AND "밀 수 있는 속성(isPush)"이라면 -> 박스 애니메이션 대상!
             if (info != null && info.isPush)
             {
                 boxT = targetObj.transform;
@@ -128,13 +215,10 @@ public class VisualManager : MonoBehaviour
             elapsed += Time.deltaTime;
             float t = elapsed / moveDuration;
             t = t * t * (3f - 2f * t);
-            
             if (objPlayer) objPlayer.transform.position = Vector3.Lerp(pStart, pEnd, t);
             if (boxT) boxT.position = Vector3.Lerp(bStart, bEnd, t);
-            
             yield return null;
         }
-        
         if (objPlayer) objPlayer.transform.position = pEnd;
         if (boxT) boxT.position = bEnd;
 
@@ -159,7 +243,6 @@ public class VisualManager : MonoBehaviour
                 int nY = isRow ? index : nextK;
                 
                 if (new Vector2Int(nX, nY) == _grid.PlayerIndex && !playerMoved) continue;
-                
                 movingObjs.Add(objMap[x, y].transform);
             }
         }
@@ -245,9 +328,4 @@ public class VisualManager : MonoBehaviour
             cam.transform.position = Vector3.zero - (cam.transform.forward * distance);
         }
     }
-}
-
-public class TileInfo : MonoBehaviour 
-{
-    public bool isPush; 
 }

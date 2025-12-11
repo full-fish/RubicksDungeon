@@ -1,7 +1,9 @@
 using UnityEngine;
 using System;
 
-// 스테이지 JSON 데이터 구조
+// 행동 종류 정의
+public enum ActionType { None, Move, ShiftRow, ShiftCol }
+
 [Serializable]
 public class StageDataRoot
 {
@@ -26,7 +28,6 @@ public class StageLayers
     public int[][] sky;    
 }
 
-// Undo(뒤로가기) 저장용 상태
 public class GameState
 {
     public int[,,] mapData;
@@ -34,14 +35,22 @@ public class GameState
     public int remainingShifts;
     public Quaternion playerRot;
 
-    public GameState(int[,,] map, Vector2Int pos, int shifts, Quaternion rot) 
+    // ★ [추가] 역재생을 위한 행동 정보
+    public ActionType actionType;
+    public int val1; // dx 또는 index
+    public int val2; // dy 또는 dir
+
+    public GameState(int[,,] map, Vector2Int pos, int shifts, Quaternion rot, ActionType type, int v1, int v2) 
     {
         this.mapData = map;
         this.playerPos = pos;
         this.remainingShifts = shifts;
-        this.playerRot = rot; 
+        this.playerRot = rot;
+        
+        this.actionType = type;
+        this.val1 = v1;
+        this.val2 = v2;
     }
 }
 
-// 오디오 타입 열거형
 public enum SoundType { Walk, Push, Destroy }
